@@ -115,7 +115,7 @@ function drawTextOverlay(ctx, text, currentTime, startTime, endTime, cW, cH, pos
   ctx.restore();
 }
 
-async function burnTextIntoVideo(videoUrl, overlays, dims) {
+async function burnTextIntoVideo(videoUrl, overlays, dims, duration) {
   setStage('Overlay', 'running', 'Fetching video file...', 8);
   const blob    = await fetch(videoUrl).then(r => {
     if (!r.ok) throw new Error('Could not fetch video: ' + r.status);
@@ -157,9 +157,13 @@ async function burnTextIntoVideo(videoUrl, overlays, dims) {
         }
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const t = video.currentTime;
-        if (overlays[0]) drawTextOverlay(ctx, overlays[0], t, 0, 2,        canvas.width, canvas.height, 'top');
-        if (overlays[1]) drawTextOverlay(ctx, overlays[1], t, 2, 4,        canvas.width, canvas.height, 'middle');
-        if (overlays[2]) drawTextOverlay(ctx, overlays[2], t, 4, duration, canvas.width, canvas.height, 'bottom');
+        // Scale overlay timings proportionally to video duration
+        const d = duration;
+        const t1end = d * 0.35;
+        const t2end = d * 0.70;
+        if (overlays[0]) drawTextOverlay(ctx, overlays[0], t, 0,     t1end, canvas.width, canvas.height, 'top');
+        if (overlays[1]) drawTextOverlay(ctx, overlays[1], t, t1end, t2end, canvas.width, canvas.height, 'middle');
+        if (overlays[2]) drawTextOverlay(ctx, overlays[2], t, t2end, d,     canvas.width, canvas.height, 'bottom');
         const pct = Math.round((t / duration) * 100);
         setStage('Overlay', 'running', `Rendering frames: ${pct}%`, 20 + Math.round(pct * 0.7));
         requestAnimationFrame(renderFrame);
@@ -253,6 +257,7 @@ async function startPipeline() {
   const o1           = document.getElementById('overlay1').value.trim();
   const o2           = document.getElementById('overlay2').value.trim();
   const o3           = document.getElementById('overlay3').value.trim();
+  const duration     = parseInt(document.getElementById('duration').value) || 8;
   const videoPrompt  = document.getElementById('videoPrompt').value.trim()
                        || `camera slowly pans across the scene, water gently rippling, smooth cinematic motion, peaceful`;
 
@@ -342,7 +347,7 @@ async function startPipeline() {
       image_url: imageUrl,
       prompt: videoPrompt,
       aspect_ratio: dims.aspect_ratio,
-      duration: 5
+      duration: duration
     }, falKey, p => setStage('Video', 'running', 'Animating...', p));
 
     rawVideoUrl = vidResult?.data?.video?.url || vidResult?.video?.url;
@@ -368,7 +373,7 @@ async function startPipeline() {
     }
     try {
       setStage('Overlay', 'running', 'Starting overlay render...', 5);
-      const finalBlob = await burnTextIntoVideo(rawVideoUrl, overlays, dims);
+      const finalBlob = await burnTextIntoVideo(rawVideoUrl, overlays, dims, duration);
       const finalUrl  = URL.createObjectURL(finalBlob);
       const ext = finalBlob.type.includes('mp4') ? 'mp4' : 'webm';
       document.getElementById('previewVideo').src = finalUrl;
