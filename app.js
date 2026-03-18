@@ -275,12 +275,11 @@ async function startPipeline() {
   // ── Stage 1: Image via Flux Dev ──────────────
   let imageUrl;
   try {
-    setStage('Image', 'running', 'Submitting to Flux Dev...', 10);
-    const imgResult = await falRun('fal-ai/flux/dev', {
-      prompt: `luxury river cruise ship on the ${destination}, ${season}, ${mood}, passengers visible on deck, ultra-photorealistic travel photography, cinematic wide shot, 8k, --style raw, no illustration, no painting`,
+    setStage('Image', 'running', 'Submitting to Flux Schnell...', 10);
+    const imgResult = await falRun('fal-ai/flux/schnell', {
+      prompt: `luxury river cruise ship on the ${destination}, ${season}, ${mood}, passengers visible on deck, ultra-photorealistic travel photography, cinematic wide shot, 8k, no illustration, no painting`,
       image_size: dims.image_size,
-      num_inference_steps: 28,
-      guidance_scale: 3.5,
+      num_inference_steps: 4,
       num_images: 1,
       enable_safety_checker: true
     }, falKey, p => setStage('Image', 'running', 'Generating...', p));
