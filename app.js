@@ -285,6 +285,7 @@ async function startPipeline() {
       enable_safety_checker: true
     }, falKey, p => setStage('Image', 'running', 'Generating...', p));
 
+    console.log('FAL IMAGE RESPONSE:', JSON.stringify(imgResult, null, 2));
     imageUrl = imgResult?.data?.images?.[0]?.url || imgResult?.images?.[0]?.url;
     if (!imageUrl) throw new Error('No image URL returned from Flux. Response: ' + JSON.stringify(imgResult).slice(0, 200));
     document.getElementById('previewImage').src = imageUrl;
