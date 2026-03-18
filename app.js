@@ -5,39 +5,15 @@
 // v3 — uses fal.ai JS client (esm.sh) to avoid CORS issues on GitHub Pages
 // ─────────────────────────────────────────────
 
-// ── Key persistence (localStorage) ───────────
+// ── Keys are session-only, never stored ───────
 
-const LS_FAL = 'cruise_ad_fal_key';
-const LS_ANT = 'cruise_ad_anthropic_key';
-
-function loadSavedKeys() {
-  const falKey  = localStorage.getItem(LS_FAL);
-  const antKey  = localStorage.getItem(LS_ANT);
-  if (falKey)  document.getElementById('falKey').value       = falKey;
-  if (antKey)  document.getElementById('anthropicKey').value = antKey;
-  if (falKey || antKey) document.getElementById('rememberKeys').checked = true;
-}
-
-function handleRememberToggle() {
-  if (!document.getElementById('rememberKeys').checked) {
-    localStorage.removeItem(LS_FAL);
-    localStorage.removeItem(LS_ANT);
-    document.getElementById('rememberNote').textContent = 'Keys cleared from browser storage.';
-    setTimeout(() => document.getElementById('rememberNote').textContent = 'Stored in browser only — never sent to any server.', 2500);
-  } else {
-    saveKeysIfRequired();
-  }
-}
+document.addEventListener('DOMContentLoaded', () => {
+  // Keys intentionally not persisted — enter each session
+});
 
 function saveKeysIfRequired() {
-  if (!document.getElementById('rememberKeys').checked) return;
-  const fk = document.getElementById('falKey').value.trim();
-  const ak = document.getElementById('anthropicKey').value.trim();
-  if (fk) localStorage.setItem(LS_FAL, fk);
-  if (ak) localStorage.setItem(LS_ANT, ak);
+  // Intentionally empty — keys are session-only
 }
-
-document.addEventListener('DOMContentLoaded', loadSavedKeys);
 
 // ── Helpers ───────────────────────────────────
 
