@@ -395,7 +395,3 @@ async function startPipeline() {
 }
 
 
-// ── Expose functions to global scope (required for onclick handlers with type=module) ──
-window.startPipeline     = startPipeline;
-window.handleRememberToggle = handleRememberToggle;
-window.copyText          = copyText;
