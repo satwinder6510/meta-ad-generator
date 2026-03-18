@@ -91,23 +91,45 @@
 
 <div class="card">
   <div class="card-title"><span class="step">2</span> Campaign Brief</div>
-  <div class="grid-2">
-    <div class="field">
-      <label>Destination / River</label>
-      <input type="text" id="destination" placeholder="Rhine, Germany" />
-    </div>
-    <div class="field">
-      <label>Season / Lighting</label>
-      <select id="season">
-        <option value="golden hour autumn">Autumn golden hour</option>
-        <option value="spring morning mist">Spring morning</option>
-        <option value="summer midday sun">Summer midday</option>
-        <option value="winter snow twilight">Winter twilight</option>
-        <option value="blue hour dusk">Blue hour dusk</option>
-      </select>
+
+  <div class="field">
+    <label>Image Source</label>
+    <div style="display:flex;gap:0.75rem;margin-bottom:0.75rem">
+      <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:13px;cursor:pointer;letter-spacing:0;color:var(--text)">
+        <input type="radio" name="imageSource" value="ai" id="srcAI" checked onchange="toggleImageSource()" style="width:auto;padding:0;accent-color:var(--gold);" /> Generate with AI
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:13px;cursor:pointer;letter-spacing:0;color:var(--text)">
+        <input type="radio" name="imageSource" value="upload" id="srcUpload" onchange="toggleImageSource()" style="width:auto;padding:0;accent-color:var(--gold);" /> Upload my own image
+      </label>
     </div>
   </div>
-  <div class="grid-2">
+
+  <div id="uploadField" class="field" style="display:none">
+    <label>Upload Image (JPG or PNG)</label>
+    <input type="file" id="imageUpload" accept="image/jpeg,image/png,image/webp" style="padding:0.5rem 0.9rem;cursor:pointer;" />
+    <div class="tip">Your image goes directly to fal.ai for animation — not stored anywhere else</div>
+  </div>
+
+  <div id="aiFields">
+    <div class="grid-2">
+      <div class="field">
+        <label>Destination / River</label>
+        <input type="text" id="destination" placeholder="Rhine, Germany" />
+      </div>
+      <div class="field">
+        <label>Season / Lighting</label>
+        <select id="season">
+          <option value="golden hour autumn">Autumn golden hour</option>
+          <option value="spring morning mist">Spring morning</option>
+          <option value="summer midday sun">Summer midday</option>
+          <option value="winter snow twilight">Winter twilight</option>
+          <option value="blue hour dusk">Blue hour dusk</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-top:0.75rem">
     <div class="field">
       <label>Ad Format</label>
       <select id="format">
