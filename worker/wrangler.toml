@@ -1,0 +1,11 @@
+name = "meta-ad-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[r2_buckets]]
+binding = "AD_VIDEOS"
+bucket_name = "meta-ad-videos"
+
+[vars]
+ALLOWED_ORIGIN = "https://satwinder6510.github.io"
