@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>River Cruise Ad Generator</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy: #0a0e1a; --navy2: #111827; --navy3: #1a2235;
+    --gold: #c9a84c; --gold-light: #e8c97a; --gold-dim: rgba(201,168,76,0.15);
+    --text: #f0ebe0; --text-muted: #8a9ab8; --border: rgba(201,168,76,0.2);
+    --success: #4caf84; --error: #e05c5c;
+  }
+  body { background: var(--navy); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; line-height: 1.6; padding: 2rem; max-width: 720px; margin: 0 auto; }
+  .header { text-align: center; margin-bottom: 2.5rem; }
+  .header h1 { font-family: 'Cormorant Garamond', serif; font-size: 2.4rem; font-weight: 300; letter-spacing: 0.12em; color: var(--gold-light); text-transform: uppercase; margin-bottom: 0.3rem; }
+  .header p { color: var(--text-muted); font-size: 13px; letter-spacing: 0.04em; }
+  .divider { width: 60px; height: 1px; background: var(--gold); margin: 0.8rem auto; opacity: 0.5; }
+  .card { background: var(--navy2); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.25rem; }
+  .card-title { font-family: 'Cormorant Garamond', serif; font-size: 1rem; font-weight: 500; color: var(--gold); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 1.2rem; display: flex; align-items: center; gap: 8px; }
+  .step { width: 22px; height: 22px; border-radius: 50%; background: var(--gold-dim); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--gold); flex-shrink: 0; }
+  .field { margin-bottom: 1rem; }
+  .field:last-child { margin-bottom: 0; }
+  label { display: block; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.4rem; }
+  input, select { width: 100%; background: var(--navy3); border: 1px solid rgba(138,154,184,0.2); border-radius: 8px; padding: 0.65rem 0.9rem; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; outline: none; transition: border-color 0.2s; appearance: none; -webkit-appearance: none; }
+  input:focus, select:focus { border-color: var(--gold); }
+  input::placeholder { color: var(--text-muted); }
+  .input-key { font-family: monospace; font-size: 12px; letter-spacing: 0.03em; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .btn { width: 100%; padding: 0.9rem; background: linear-gradient(135deg, var(--gold) 0%, #a8762e 100%); border: none; border-radius: 8px; color: #0a0e1a; font-family: 'DM Sans', sans-serif; font-weight: 600; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: opacity 0.2s, transform 0.1s; margin-top: 1.25rem; }
+  .btn:hover:not(:disabled) { opacity: 0.88; }
+  .btn:active:not(:disabled) { transform: scale(0.99); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .tip { font-size: 11px; color: var(--text-muted); margin-top: 0.4rem; }
+  .section-sub { font-size: 11px; color: var(--text-muted); margin-bottom: 0.75rem; margin-top: -0.5rem; }
+  .pipeline { margin-top: 1.5rem; }
+  .stage { background: var(--navy2); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+  .stage-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+  .stage-name { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+  .badge { font-size: 10px; padding: 2px 10px; border-radius: 20px; font-weight: 500; letter-spacing: 0.04em; white-space: nowrap; }
+  .badge-wait { background: rgba(138,154,184,0.15); color: var(--text-muted); }
+  .badge-running { background: rgba(201,168,76,0.15); color: var(--gold); }
+  .badge-done { background: rgba(76,175,132,0.15); color: var(--success); }
+  .badge-error { background: rgba(224,92,92,0.15); color: var(--error); }
+  .progress-bar { height: 2px; background: rgba(138,154,184,0.12); border-radius: 2px; overflow: hidden; margin-bottom: 0.75rem; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-light)); border-radius: 2px; transition: width 0.4s ease; }
+  .stage-msg { font-size: 12px; color: var(--text-muted); }
+  .image-preview { width: 100%; border-radius: 8px; display: block; margin-top: 0.75rem; border: 1px solid var(--border); }
+  video { width: 100%; border-radius: 8px; display: block; margin-top: 0.75rem; border: 1px solid var(--border); background: #000; }
+  canvas { display: none; }
+  .download-btn { display: block; text-align: center; margin-top: 0.75rem; padding: 0.7rem; background: linear-gradient(135deg, var(--gold) 0%, #a8762e 100%); border-radius: 8px; color: #0a0e1a; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; transition: opacity 0.2s; }
+  .download-btn:hover { opacity: 0.88; }
+  .download-btn-secondary { display: block; text-align: center; margin-top: 0.5rem; padding: 0.55rem; background: var(--gold-dim); border: 1px solid var(--border); border-radius: 8px; color: var(--gold-light); text-decoration: none; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .copy-block { background: var(--navy3); border: 1px solid rgba(138,154,184,0.15); border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 0.6rem; }
+  .copy-label { font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); margin-bottom: 0.35rem; }
+  .copy-text { font-size: 13px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
+  .copy-btn-small { font-size: 10px; padding: 3px 10px; background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); cursor: pointer; float: right; margin-top: -2px; transition: border-color 0.2s, color 0.2s; }
+  .copy-btn-small:hover { border-color: var(--gold); color: var(--gold); }
+  .cost-bar { display: flex; align-items: center; justify-content: space-between; background: var(--navy3); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 1rem; margin-top: 0.75rem; font-size: 12px; }
+  .cost-label { color: var(--text-muted); }
+  .cost-value { color: var(--gold-light); font-weight: 500; }
+  .overlay-preview { background: var(--navy3); border: 1px solid rgba(138,154,184,0.15); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.75rem; }
+  .overlay-preview-title { font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); margin-bottom: 0.5rem; }
+  .timing-row { display: flex; align-items: center; gap: 10px; font-size: 12px; margin-bottom: 4px; }
+  .timing-stamp { color: var(--gold); font-family: monospace; font-size: 11px; min-width: 48px; }
+  @media (max-width: 520px) { body { padding: 1rem; } .grid-2 { grid-template-columns: 1fr; } .header h1 { font-size: 1.8rem; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Creative Studio</h1>
+  <div class="divider"></div>
+  <p>River Cruise &middot; Meta Ad Generator &middot; Text Overlay Included</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="step">1</span> API Keys</div>
+  <div class="field">
+    <label>fal.ai API Key</label>
+    <input class="input-key" type="password" id="falKey" placeholder="key-xxxxxxxxxxxxxxxx" />
+  </div>
+  <div class="field">
+    <label>Anthropic API Key (for ad copy)</label>
+    <input class="input-key" type="password" id="anthropicKey" placeholder="sk-ant-xxxxxxxxxxxxxxxx" />
+    <div class="tip">Keys are never stored — session only. Refresh page to clear.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="step">2</span> Campaign Brief</div>
+  <div class="grid-2">
+    <div class="field">
+      <label>Destination / River</label>
+      <input type="text" id="destination" placeholder="Rhine, Germany" />
+    </div>
+    <div class="field">
+      <label>Season / Lighting</label>
+      <select id="season">
+        <option value="golden hour autumn">Autumn golden hour</option>
+        <option value="spring morning mist">Spring morning</option>
+        <option value="summer midday sun">Summer midday</option>
+        <option value="winter snow twilight">Winter twilight</option>
+        <option value="blue hour dusk">Blue hour dusk</option>
+      </select>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="field">
+      <label>Ad Format</label>
+      <select id="format">
+        <option value="16:9">16:9 — Feed</option>
+        <option value="9:16">9:16 — Stories / Reels</option>
+        <option value="1:1">1:1 — Square</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Mood</label>
+      <select id="mood">
+        <option value="luxury romantic aspirational">Luxury / Romantic</option>
+        <option value="adventure discovery exciting">Adventure</option>
+        <option value="relaxing peaceful serene">Relaxing / Peaceful</option>
+        <option value="festive celebratory joyful">Festive</option>
+      </select>
+    </div>
+  </div>
+  <div class="field">
+    <label>Offer / Price Hook (optional)</label>
+    <input type="text" id="offer" placeholder="e.g. From £1,299pp · Free cabin upgrade" />
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="step">3</span> Text Overlay</div>
+  <p class="section-sub">Burned into the video — readable with sound off</p>
+  <div class="field">
+    <label>Line 1 &middot; 0–2s — Destination hook (top)</label>
+    <input type="text" id="overlay1" placeholder="e.g. Discover the Rhine" />
+  </div>
+  <div class="field">
+    <label>Line 2 &middot; 2–4s — Offer / benefit (centre)</label>
+    <input type="text" id="overlay2" placeholder="e.g. From £1,299pp · All inclusive" />
+  </div>
+  <div class="field">
+    <label>Line 3 &middot; 4–5s — CTA (bottom)</label>
+    <input type="text" id="overlay3" placeholder="e.g. Book your 2025 cruise today" />
+  </div>
+  <button class="btn" id="generateBtn" onclick="startPipeline()">&#9654; Generate Ad Creative</button>
+</div>
+
+<div class="pipeline" id="pipeline" style="display:none">
+
+  <div class="stage" id="stageImage">
+    <div class="stage-header">
+      <span class="stage-name">Image &middot; Flux Dev</span>
+      <span class="badge badge-wait" id="badgeImage">Waiting</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progImage" style="width:0%"></div></div>
+    <div class="stage-msg" id="msgImage">Ready</div>
+    <img id="previewImage" class="image-preview" style="display:none" alt="Generated image" />
+  </div>
+
+  <div class="stage" id="stageVideo">
+    <div class="stage-header">
+      <span class="stage-name">Video &middot; Seedance Lite</span>
+      <span class="badge badge-wait" id="badgeVideo">Waiting</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progVideo" style="width:0%"></div></div>
+    <div class="stage-msg" id="msgVideo">Waiting for image</div>
+  </div>
+
+  <div class="stage" id="stageOverlay">
+    <div class="stage-header">
+      <span class="stage-name">Text Overlay &middot; Canvas Render</span>
+      <span class="badge badge-wait" id="badgeOverlay">Waiting</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progOverlay" style="width:0%"></div></div>
+    <div class="stage-msg" id="msgOverlay">Waiting for video</div>
+    <video id="previewVideo" controls style="display:none" crossorigin="anonymous"></video>
+    <canvas id="overlayCanvas"></canvas>
+    <div id="downloadWrap" style="display:none">
+      <a id="downloadFinal" class="download-btn">&#11015; Download Final Ad (text burned in)</a>
+      <a id="downloadRaw" class="download-btn-secondary" target="_blank">Download raw MP4 (no text overlay)</a>
+    </div>
+    <div class="overlay-preview" id="overlayPreview" style="display:none">
+      <div class="overlay-preview-title">Text overlay schedule</div>
+      <div id="overlayTiming"></div>
+    </div>
+  </div>
+
+  <div class="stage" id="stageCopy">
+    <div class="stage-header">
+      <span class="stage-name">Facebook Copy &middot; Claude</span>
+      <span class="badge badge-wait" id="badgeCopy">Waiting</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progCopy" style="width:0%"></div></div>
+    <div class="stage-msg" id="msgCopy">Waiting</div>
+    <div id="copyPanel" style="display:none; margin-top:0.75rem;"></div>
+  </div>
+
+  <div class="cost-bar" id="costBar" style="display:none">
+    <span class="cost-label">Estimated cost this generation</span>
+    <span class="cost-value" id="costValue">~$0.18</span>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
