@@ -393,3 +393,9 @@ async function startPipeline() {
   document.getElementById('costBar').style.display = 'flex';
   document.getElementById('generateBtn').disabled = false;
 }
+
+
+// ── Expose functions to global scope (required for onclick handlers with type=module) ──
+window.startPipeline     = startPipeline;
+window.handleRememberToggle = handleRememberToggle;
+window.copyText          = copyText;
