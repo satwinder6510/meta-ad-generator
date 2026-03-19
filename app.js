@@ -7,6 +7,7 @@
 
 let scenes = [];
 let falClient = null;
+let productImages = []; // Array of { file: File, previewUrl: string, falUrl: string|null }
 const MIN_SCENES = 3;
 const MAX_SCENES = 4;
 const CROSSFADE_DURATION = 0.5; // seconds
@@ -118,6 +119,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('adFormat').addEventListener('change', function() {
     applyFormatDefaults(this.value);
   });
+
+  // Product image upload
+  document.getElementById('productImageInput').addEventListener('change', handleProductImageUpload);
 });
 
 // ── Scene management ─────────────────────────
@@ -156,6 +160,9 @@ function renderScenes() {
         <label>
           <input type="radio" name="imgSrc-${scene.id}" value="upload" onchange="toggleSceneSource('${scene.id}')"> Upload image
         </label>
+        ${productImages.length > 0 ? `<label>
+          <input type="radio" name="imgSrc-${scene.id}" value="product" onchange="toggleSceneSource('${scene.id}')"> Use product image
+        </label>` : ''}
       </div>
 
       <div id="aiFields-${scene.id}">
@@ -170,6 +177,16 @@ function renderScenes() {
           <label>Upload Image</label>
           <input type="file" id="file-${scene.id}" accept="image/jpeg,image/png,image/webp" style="padding:0.5rem 0.9rem;cursor:pointer" />
         </div>
+      </div>
+
+      <div id="productField-${scene.id}" style="display:none">
+        <div class="field">
+          <label>Select Product Image</label>
+          <select id="productSelect-${scene.id}">
+            ${productImages.map((p, j) => `<option value="${j}">Product ${j + 1}</option>`).join('')}
+          </select>
+        </div>
+        <div class="tip">This image will be used exactly as-is. Motion will be minimal to preserve product accuracy.</div>
       </div>
 
       <div class="field">
@@ -255,17 +272,21 @@ function moveScene(id, direction) {
 }
 
 function toggleSceneSource(id) {
-  const isUpload = document.querySelector(`input[name="imgSrc-${id}"][value="upload"]`).checked;
-  document.getElementById(`uploadField-${id}`).style.display = isUpload ? 'block' : 'none';
-  document.getElementById(`aiFields-${id}`).style.display = isUpload ? 'none' : 'block';
+  const mode = document.querySelector(`input[name="imgSrc-${id}"]:checked`)?.value || 'ai';
+  document.getElementById(`aiFields-${id}`).style.display = mode === 'ai' ? 'block' : 'none';
+  document.getElementById(`uploadField-${id}`).style.display = mode === 'upload' ? 'block' : 'none';
+  const productField = document.getElementById(`productField-${id}`);
+  if (productField) productField.style.display = mode === 'product' ? 'block' : 'none';
 }
 
 function collectAllSceneValues() {
   return scenes.map(scene => {
     const id = scene.id;
-    const isUpload = document.querySelector(`input[name="imgSrc-${id}"][value="upload"]`)?.checked || false;
+    const mode = document.querySelector(`input[name="imgSrc-${id}"]:checked`)?.value || 'ai';
     return {
-      isUpload,
+      isUpload: mode === 'upload',
+      isProduct: mode === 'product',
+      productIndex: mode === 'product' ? parseInt(document.getElementById(`productSelect-${id}`)?.value || '0') : null,
       description: document.getElementById(`desc-${id}`)?.value || '',
       motion: document.getElementById(`motion-${id}`)?.value || '',
       overlay: document.getElementById(`overlay-${id}`)?.value || '',
@@ -291,11 +312,51 @@ function restoreAllSceneValues(values) {
     if (document.getElementById(`overlaySize-${id}`)) document.getElementById(`overlaySize-${id}`).value = v.overlaySize || 'medium';
     if (document.getElementById(`overlayAnim-${id}`)) document.getElementById(`overlayAnim-${id}`).value = v.overlayAnim || 'fade';
     if (document.getElementById(`duration-${id}`)) document.getElementById(`duration-${id}`).value = v.duration;
-    if (v.isUpload) {
+    if (v.isProduct) {
+      const radio = document.querySelector(`input[name="imgSrc-${id}"][value="product"]`);
+      if (radio) { radio.checked = true; toggleSceneSource(id); }
+      const sel = document.getElementById(`productSelect-${id}`);
+      if (sel && v.productIndex != null) sel.value = v.productIndex;
+    } else if (v.isUpload) {
       const radio = document.querySelector(`input[name="imgSrc-${id}"][value="upload"]`);
       if (radio) { radio.checked = true; toggleSceneSource(id); }
     }
   });
+}
+
+// ── Product Images ───────────────────────────
+
+function handleProductImageUpload(e) {
+  const files = Array.from(e.target.files || []);
+  const remaining = 4 - productImages.length;
+  const toAdd = files.slice(0, remaining);
+  toAdd.forEach(file => {
+    productImages.push({ file, previewUrl: URL.createObjectURL(file), falUrl: null });
+  });
+  renderProductImages();
+  renderScenes(); // re-render to show/hide product radio option
+  e.target.value = ''; // reset input
+}
+
+function renderProductImages() {
+  const list = document.getElementById('productImagesList');
+  if (productImages.length === 0) {
+    list.innerHTML = '';
+    return;
+  }
+  list.innerHTML = productImages.map((p, i) => `
+    <div class="product-thumb-wrap">
+      <img src="${p.previewUrl}" class="product-thumb" alt="Product ${i + 1}" />
+      <button class="product-thumb-remove" onclick="removeProductImage(${i})" title="Remove">&times;</button>
+    </div>
+  `).join('') + `<span style="font-size:11px;color:var(--text-muted);align-self:center">${productImages.length} of 4</span>`;
+}
+
+function removeProductImage(index) {
+  const removed = productImages.splice(index, 1);
+  if (removed[0]?.previewUrl) URL.revokeObjectURL(removed[0].previewUrl);
+  renderProductImages();
+  renderScenes(); // re-render to update product radio visibility
 }
 
 // ── Creative Director: Generate Brief ─────────
@@ -321,13 +382,40 @@ async function generateBrief() {
     '21:9': 'Facebook Feed (ultra-wide cinematic, immersive, minimal text space)',
   };
 
+  const brandUrl = document.getElementById('brandUrl').value.trim();
+  const workerUrl = document.getElementById('workerUrl').value.trim();
+
   const btn = document.getElementById('generateBriefBtn');
   const statusEl = document.getElementById('briefStatus');
   btn.disabled = true;
   btn.textContent = 'Generating Brief...';
   statusEl.style.display = 'inline';
   statusEl.style.color = 'var(--text-muted)';
+
+  // Fetch brand website context if URL provided
+  let brandContext = '';
+  if (brandUrl && workerUrl) {
+    try {
+      statusEl.textContent = 'Reading brand website...';
+      const proxyRes = await fetch(`${workerUrl.replace(/\/$/, '')}/proxy?url=${encodeURIComponent(brandUrl)}`);
+      if (proxyRes.ok) {
+        const proxyData = await proxyRes.json();
+        if (proxyData.text && !proxyData.error) {
+          brandContext = `\nBrand Website Context (from ${proxyData.title || brandUrl}):\n${proxyData.text}\n\nUse this to match the brand's tone, vocabulary, and positioning in scene descriptions and overlay text.\n`;
+        }
+      }
+    } catch (e) {
+      // Silently skip — don't block brief generation
+    }
+  }
+
   statusEl.textContent = 'Claude is planning your ad...';
+
+  // Product image awareness
+  let productContext = '';
+  if (productImages.length > 0) {
+    productContext = `\nYou have ${productImages.length} product image(s) available. You can assign product images to scenes by adding "useProduct": true and "productIndex": <0-based index> to scene objects.\nProduct scenes should have motion prompts that are very subtle (the product must not be altered). Do NOT include a "description" for product scenes — the real product photo is used instead.\n`;
+  }
 
   const userPrompt = `Generate a ${sceneCount}-scene video ad brief.
 
@@ -336,7 +424,7 @@ Target Audience: ${targetAudience}
 Ad Objective: ${adObjective}
 Format: ${adFormat} — ${formatContext[adFormat] || 'Standard'}
 ${offer ? `Offer/Hook: ${offer}` : 'No specific offer — create a compelling hook'}
-
+${brandContext}${productContext}
 Return ONLY a valid JSON array with exactly ${sceneCount} objects. Each object must have:
 {
   "description": "Detailed image generation prompt (what Flux AI should render — be specific about composition, lighting, mood, subject, colors)",
@@ -403,12 +491,23 @@ function applyBrief(brief) {
     const id = scene.id;
     const b = brief[i];
 
-    // Ensure "Generate with AI" is selected
-    const aiRadio = document.querySelector(`input[name="imgSrc-${id}"][value="ai"]`);
-    if (aiRadio) { aiRadio.checked = true; toggleSceneSource(id); }
+    // Handle product scenes from brief
+    if (b.useProduct && productImages.length > 0) {
+      const productRadio = document.querySelector(`input[name="imgSrc-${id}"][value="product"]`);
+      if (productRadio) {
+        productRadio.checked = true;
+        toggleSceneSource(id);
+        const sel = document.getElementById(`productSelect-${id}`);
+        if (sel) sel.value = Math.min(b.productIndex || 0, productImages.length - 1);
+      }
+    } else {
+      // Ensure "Generate with AI" is selected
+      const aiRadio = document.querySelector(`input[name="imgSrc-${id}"][value="ai"]`);
+      if (aiRadio) { aiRadio.checked = true; toggleSceneSource(id); }
+    }
 
     if (document.getElementById(`desc-${id}`))         document.getElementById(`desc-${id}`).value = b.description || '';
-    if (document.getElementById(`motion-${id}`))       document.getElementById(`motion-${id}`).value = b.motion || '';
+    if (document.getElementById(`motion-${id}`))       document.getElementById(`motion-${id}`).value = b.useProduct ? 'static product shot, very subtle lighting shift, no morphing or deformation' : (b.motion || '');
     if (document.getElementById(`overlay-${id}`))      document.getElementById(`overlay-${id}`).value = b.overlay || '';
     if (document.getElementById(`overlayPos-${id}`))   document.getElementById(`overlayPos-${id}`).value = b.overlayPos || 'centre';
     if (document.getElementById(`overlayStyle-${id}`)) document.getElementById(`overlayStyle-${id}`).value = b.overlayStyle || 'clean';
@@ -1006,12 +1105,14 @@ function showVideoPreview(i, blobUrl) {
 function collectSceneData() {
   return scenes.map(scene => {
     const id = scene.id;
-    const isUpload = document.querySelector(`input[name="imgSrc-${id}"][value="upload"]`)?.checked || false;
+    const mode = document.querySelector(`input[name="imgSrc-${id}"]:checked`)?.value || 'ai';
     return {
       id,
-      isUpload,
+      isUpload: mode === 'upload',
+      isProduct: mode === 'product',
+      productIndex: mode === 'product' ? parseInt(document.getElementById(`productSelect-${id}`)?.value || '0') : null,
       description: document.getElementById(`desc-${id}`)?.value?.trim() || '',
-      file: isUpload ? document.getElementById(`file-${id}`)?.files?.[0] : null,
+      file: mode === 'upload' ? document.getElementById(`file-${id}`)?.files?.[0] : null,
       motion: document.getElementById(`motion-${id}`)?.value?.trim() || 'slow cinematic camera movement',
       overlay: document.getElementById(`overlay-${id}`)?.value?.trim() || '',
       overlayPos: document.getElementById(`overlayPos-${id}`)?.value || 'centre',
@@ -1030,7 +1131,17 @@ async function generateOneImage(i) {
   const falKey = document.getElementById('falKey').value.trim();
   const dims = pipeline.dims;
 
-  if (scene.isUpload) {
+  if (scene.isProduct) {
+    setImgStage(i, 'running', 'Preparing product image...', 20);
+    const pi = productImages[scene.productIndex];
+    if (!pi) throw new Error('Product image not found');
+    if (!pi.falUrl) {
+      pi.falUrl = await uploadImageToFal(pi.file, falKey, dims);
+    }
+    pipeline.imageUrls[i] = pi.falUrl;
+    setImgStage(i, 'done', 'Product image ready', 100);
+    showImagePreview(i, pi.falUrl);
+  } else if (scene.isUpload) {
     setImgStage(i, 'running', 'Resizing & uploading...', 20);
     const url = await uploadImageToFal(scene.file, falKey, dims);
     pipeline.imageUrls[i] = url;
@@ -1072,8 +1183,10 @@ async function generateImages() {
 
   for (let i = 0; i < pipeline.sceneData.length; i++) {
     const s = pipeline.sceneData[i];
-    if (s.isUpload && !s.file) { alert(`Scene ${i + 1}: Please select an image to upload`); return; }
-    if (!s.isUpload && !s.description) { alert(`Scene ${i + 1}: Please enter a scene description`); return; }
+    if (s.isProduct) {
+      if (!productImages[s.productIndex]) { alert(`Scene ${i + 1}: Selected product image not found`); return; }
+    } else if (s.isUpload && !s.file) { alert(`Scene ${i + 1}: Please select an image to upload`); return; }
+    else if (!s.isUpload && !s.isProduct && !s.description) { alert(`Scene ${i + 1}: Please enter a scene description`); return; }
   }
 
   // Set up UI
@@ -1153,13 +1266,18 @@ async function generateOneVideo(i) {
   scene.overlayAnim = document.getElementById(`overlayAnim-${id}`)?.value || scene.overlayAnim || 'fade';
   scene.duration = document.getElementById(`duration-${id}`)?.value || scene.duration;
 
-  setVidStage(i, 'running', 'Animating...', 10);
+  // Product scenes get conservative motion to preserve product integrity
+  const motionPrompt = scene.isProduct
+    ? 'static product shot, very subtle lighting shift, no morphing or deformation'
+    : scene.motion;
+
+  setVidStage(i, 'running', scene.isProduct ? 'Animating (conservative)...' : 'Animating...', 10);
   const vidResult = await falRun('fal-ai/bytedance/seedance/v1/lite/image-to-video', {
     image_url: imageUrl,
-    prompt: scene.motion,
+    prompt: motionPrompt,
     aspect_ratio: dims.aspect_ratio,
     duration: parseInt(scene.duration),
-  }, falKey, p => setVidStage(i, 'running', 'Animating...', p));
+  }, falKey, p => setVidStage(i, 'running', scene.isProduct ? 'Animating (conservative)...' : 'Animating...', p));
 
   const videoUrl = vidResult?.data?.video?.url || vidResult?.video?.url;
   if (!videoUrl) throw new Error('No video URL returned');

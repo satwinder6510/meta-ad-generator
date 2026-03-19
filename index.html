@@ -120,6 +120,11 @@
   .hook-option { padding: 0.4rem 0.6rem; font-size: 12px; color: var(--text); cursor: pointer; border-radius: 6px; transition: background 0.15s; margin-bottom: 2px; }
   .hook-option:hover { background: var(--accent-dim); color: var(--accent-light); }
 
+  /* Product image thumbnails */
+  .product-thumb { width:64px; height:64px; border-radius:6px; object-fit:cover; border:2px solid var(--accent); }
+  .product-thumb-wrap { position:relative; display:inline-block; }
+  .product-thumb-remove { position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:var(--error); color:#fff; border:none; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1; }
+
   @media (max-width: 520px) {
     body { padding: 1rem 0.5rem; }
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
@@ -187,6 +192,11 @@
     <label>Offer or Hook (optional)</label>
     <input type="text" id="offerHook" placeholder="e.g. 50% off first month &middot; Free shipping over $50" />
   </div>
+  <div class="field">
+    <label>Brand Website (optional)</label>
+    <input type="text" id="brandUrl" placeholder="https://yourbrand.com" />
+    <div class="tip">We'll read your site to match brand voice and positioning in the brief.</div>
+  </div>
 </div>
 
 <!-- Scenes Card -->
@@ -197,6 +207,13 @@
   <div id="briefToolbar" style="display:flex;gap:8px;align-items:center;margin-bottom:1rem">
     <button class="btn-sm btn-outline" id="generateBriefBtn" onclick="generateBrief()" style="background:var(--accent-dim)">Generate Ad Brief</button>
     <span id="briefStatus" style="font-size:11px;color:var(--text-muted);display:none"></span>
+  </div>
+
+  <div id="productImagesSection" style="margin-bottom:1rem">
+    <label style="display:block;margin-bottom:0.4rem">Product Images <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:10px">(these will never be altered by AI)</span></label>
+    <div id="productImagesList" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.5rem"></div>
+    <input type="file" id="productImageInput" accept="image/jpeg,image/png,image/webp" multiple style="display:none" />
+    <button class="btn-sm btn-outline" onclick="document.getElementById('productImageInput').click()">+ Add Product Images</button>
   </div>
 
   <div id="scenesContainer"></div>
@@ -269,6 +286,6 @@
   <button class="btn-start-over" id="startOverBtn" onclick="startOver()" style="display:none">Start Over</button>
 </div>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

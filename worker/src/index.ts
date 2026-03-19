@@ -36,6 +36,39 @@ export default {
       return jsonResponse({ ok: true }, 200, cors);
     }
 
+    // Proxy: fetch external URL, extract text content
+    if (url.pathname === '/proxy' && request.method === 'GET') {
+      const targetUrl = url.searchParams.get('url');
+      if (!targetUrl || !targetUrl.startsWith('http')) {
+        return jsonResponse({ error: 'Missing or invalid url parameter' }, 400, cors);
+      }
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(targetUrl, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MetaAdBot/1.0)' },
+        });
+        clearTimeout(timeout);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const html = await res.text();
+        // Extract title
+        const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const title = titleMatch ? titleMatch[1].trim() : '';
+        // Strip scripts, styles, then all tags
+        const text = html
+          .replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 4000);
+        return jsonResponse({ text, title }, 200, cors);
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || 'Fetch failed' }, 502, cors);
+      }
+    }
+
     // Upload video
     if (url.pathname === '/upload' && request.method === 'POST') {
       const contentType = request.headers.get('Content-Type') || 'video/webm';
