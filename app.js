@@ -102,16 +102,23 @@ function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 // ── Creative Director system prompt ───────────
 
-const BRIEF_SYSTEM_PROMPT = `You are a Creative Director specializing in Meta/Facebook video ads. You understand Facebook's algorithm priorities:
+const BRIEF_SYSTEM_PROMPT = `You are a Creative Director specializing in Meta/Facebook video ads.
 
-- **3-second rule**: The first 3 seconds determine whether a user stops scrolling. Scene 1 MUST have a visually striking image and bold overlay text that creates curiosity or urgency.
-- **Sound-off optimization**: 85%+ of Facebook video is watched without sound. Every scene MUST have overlay text that tells the story visually.
-- **Hook-first structure**: Lead with the most compelling visual/claim. Don't save the best for last.
-- **Emotional arc**: Scene 1 = attention/curiosity, Scene 2 = problem/desire, Scene 3 = solution/proof, Scene 4 (if present) = CTA/urgency.
-- **Short attention spans**: Keep each scene punchy. Prefer 5s scenes for Stories/Reels formats.
-- **Platform-native feel**: Match the format context (vertical = Stories/Reels energy, landscape = Feed polish, square = versatile).
+CRITICAL RULE: Every scene description MUST be about the SPECIFIC business, their ACTUAL products/services, and their REAL customers. NEVER invent products, categories, or visuals that aren't described in the business info or brand website context provided. If the business sells handmade candles, every scene shows candles. If they sell accounting software, every scene shows that software. No generic stock-photo concepts.
 
-Given the business info, audience, objective, format, and scene count, generate a complete ad brief as a JSON array.`;
+Facebook algorithm priorities:
+- **3-second rule**: Scene 1 must stop the scroll with a striking visual OF THE ACTUAL PRODUCT/SERVICE.
+- **Sound-off**: 85%+ watched muted. Overlay text tells the story.
+- **Hook-first**: Lead with the most compelling product visual or customer benefit.
+- **Emotional arc**: Scene 1 = attention (show the product), Scene 2 = desire (show the benefit), Scene 3 = proof (show results/social proof), Scene 4 (if present) = CTA/urgency.
+
+When brand website context is provided, you MUST:
+- Use the exact product names, categories, and terminology from the website
+- Match the brand's visual style (colors, mood, setting) in scene descriptions
+- Reference real offerings, not imagined ones
+- If the website shows specific products, describe those products in scenes
+
+When NO brand website context is provided, base everything strictly on the business name, target audience, and offer fields. Ask yourself "what does this business actually sell?" and only show that.`;
 
 // ── Format-aware defaults ─────────────────────
 
@@ -505,19 +512,20 @@ async function generateBrief() {
     productContext = `\nYou have ${productImages.length} product image(s) available. You can assign product images to scenes by adding "useProduct": true and "productIndex": <0-based index> to scene objects.\nProduct scenes should have motion prompts that are very subtle (the product must not be altered). Do NOT include a "description" for product scenes — the real product photo is used instead.\n`;
   }
 
-  const userPrompt = `Generate a ${sceneCount}-scene video ad brief.
+  const userPrompt = `Generate a ${sceneCount}-scene video ad brief for this SPECIFIC business:
 
+=== BUSINESS INFO (use this as your primary source) ===
 Business/Product: ${businessName}
 Target Audience: ${targetAudience}
 Ad Objective: ${adObjective}
+${offer ? `Offer/Hook: ${offer}` : 'No specific offer — create a compelling hook based on what this business actually sells'}
 Format: ${adFormat} — ${formatContext[adFormat] || 'Standard'}
-${offer ? `Offer/Hook: ${offer}` : 'No specific offer — create a compelling hook'}
-${brandContext}${productContext}
+${brandContext ? `\n=== BRAND WEBSITE CONTENT (this is from their actual website — use it!) ===\n${brandContext}\nIMPORTANT: The scene descriptions MUST reflect the real products, services, and brand shown on this website. Do NOT invent products they don't sell.\n` : `\nNo brand website provided. Base all visuals strictly on "${businessName}" and the target audience above. Do NOT guess or invent products — keep scenes focused on what the business name and offer clearly imply.\n`}${productContext}
 Return ONLY a valid JSON array with exactly ${sceneCount} objects. Each object must have:
 {
-  "description": "Detailed image generation prompt (what Flux AI should render — be specific about composition, lighting, mood, subject, colors)",
+  "description": "Photorealistic image prompt showing THIS business's actual product/service. Be specific: what product, what setting, what customer. No text in the image. No generic stock-photo concepts.",
   "motion": "Camera/motion prompt for video animation (e.g. 'slow zoom in with gentle parallax', 'smooth pan right revealing product')",
-  "overlay": "Overlay text for this scene (concise, impactful, readable at a glance)",
+  "overlay": "Overlay text for this scene (concise, impactful, about THIS business)",
   "overlayPos": "top" | "centre" | "bottom",
   "overlayStyle": "clean" | "bold" | "cinematic" | "minimal" | "highlight" | "subtitle",
   "overlaySize": "small" | "medium" | "large",
@@ -526,11 +534,11 @@ Return ONLY a valid JSON array with exactly ${sceneCount} objects. Each object m
 }
 
 Rules:
-- Scene 1 is the HOOK scene: use bold/highlight style, large size, bottom position for vertical or centre for landscape
-- Scene descriptions should be photorealistic, no text in the image (text comes from overlay)
-- Motion prompts should be subtle and cinematic, not jarring
-- Overlay text must work with sound off — tell the complete story through text
-- Keep overlay text to 6 words max per scene for readability
+- EVERY scene description must be about "${businessName}" specifically — not generic lifestyle imagery
+- Scene 1 is the HOOK scene: show the hero product/service, bold/highlight style, large size
+- Scene descriptions: photorealistic, no text in the image, show the ACTUAL product/service
+- Motion prompts: subtle and cinematic, not jarring
+- Overlay text: works with sound off, max 6 words, tells the story of THIS business
 - Duration: prefer 5s for ${adFormat === '9:16' ? 'Stories/Reels' : 'most formats'}, 8s only for establishing shots`;
 
   try {
