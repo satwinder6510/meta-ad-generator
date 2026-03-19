@@ -11,12 +11,23 @@ const MIN_SCENES = 3;
 const MAX_SCENES = 4;
 const CROSSFADE_DURATION = 0.5; // seconds
 
+// ── Error handler ────────────────────────────
+
+window.onerror = function(msg, src, line) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:12px 16px;background:#dc2626;color:#fff;font-size:13px;z-index:9999';
+  el.textContent = 'JS Error: ' + msg + ' (line ' + line + ')';
+  document.body.prepend(el);
+};
+
 // ── Init ─────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Restore worker URL from localStorage
-  const saved = localStorage.getItem('meta-ad-worker-url');
-  if (saved) document.getElementById('workerUrl').value = saved;
+  try {
+    // Restore worker URL from localStorage
+    const saved = localStorage.getItem('meta-ad-worker-url');
+    if (saved) document.getElementById('workerUrl').value = saved;
+  } catch(e) { /* localStorage may be blocked in private mode */ }
 
   // Start with 3 default scenes
   for (let i = 0; i < MIN_SCENES; i++) addScene();
@@ -305,107 +316,26 @@ async function stitchScenes(clipData, dims) {
 
   return new Promise((resolve, reject) => {
     recorder.onstop = () => {
-      // Clean up blob URLs
       clipData.forEach(c => URL.revokeObjectURL(c.blobUrl));
       resolve(new Blob(chunks, { type: mimeType }));
     };
 
-    // Playback state
     let globalTime = 0;
-    let lastFrameTime = null;
-    let currentSceneIdx = 0;
-    let nextSceneStarted = false;
+    let lastTimestamp = null;
 
-    // Start the first video
-    videos[0].currentTime = 0;
-    videos[0].play().catch(reject);
+    // Pause all videos and seek to start
+    videos.forEach(v => { v.pause(); v.currentTime = 0; });
 
     recorder.start();
+    setStage('Stitch', 'running', 'Rendering scenes...', 15);
 
-    function renderFrame(timestamp) {
-      if (lastFrameTime === null) lastFrameTime = timestamp;
-      const dt = (timestamp - lastFrameTime) / 1000;
-      lastFrameTime = timestamp;
+    function render(timestamp) {
+      if (lastTimestamp === null) lastTimestamp = timestamp;
+      const dt = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
       globalTime += dt;
 
       if (globalTime >= totalDuration) {
-        recorder.stop();
-        setStage('Stitch', 'running', 'Encoding final video...', 95);
-        return;
-      }
-
-      // Clear canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Determine which scenes are active at this global time
-      for (let i = 0; i < timeline.length; i++) {
-        const t = timeline[i];
-        if (globalTime < t.start || globalTime >= t.end) continue;
-
-        const localTime = globalTime - t.start;
-        const sceneDur = sceneDurations[i];
-        const video = videos[i];
-
-        // Seek video to local time if not playing naturally
-        // For non-first scenes, start playing when their time comes
-        if (i > currentSceneIdx && !nextSceneStarted) {
-          // We've entered a crossfade region with the next scene
-        }
-
-        // Calculate alpha for crossfade
-        let alpha = 1;
-        // Fade in: first crossfadeDur seconds (except first scene)
-        if (i > 0 && localTime < crossfadeDur) {
-          alpha = localTime / crossfadeDur;
-        }
-        // Fade out: last crossfadeDur seconds (except last scene)
-        if (i < timeline.length - 1 && localTime > sceneDur - crossfadeDur) {
-          alpha = (sceneDur - localTime) / crossfadeDur;
-        }
-        alpha = Math.max(0, Math.min(1, alpha));
-
-        ctx.globalAlpha = alpha;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        ctx.globalAlpha = 1;
-
-        // Text overlay for this scene
-        if (clipData[i].overlay) {
-          const overlayFade = 0.3;
-          let textAlpha = 1;
-          if (localTime < overlayFade) textAlpha = localTime / overlayFade;
-          if (localTime > sceneDur - overlayFade) textAlpha = (sceneDur - localTime) / overlayFade;
-          textAlpha = Math.min(textAlpha, alpha); // Don't show text brighter than the scene
-          drawTextOverlay(ctx, clipData[i].overlay, textAlpha, canvas.width, canvas.height, clipData[i].overlayPos);
-        }
-      }
-
-      const pct = Math.round((globalTime / totalDuration) * 100);
-      setStage('Stitch', 'running', `Rendering: ${pct}%`, 15 + Math.round(pct * 0.8));
-      requestAnimationFrame(renderFrame);
-    }
-
-    // We need a frame-accurate approach: seek each video manually per frame
-    // Using requestAnimationFrame-driven rendering with manual seeks
-    let rafGlobalTime = 0;
-    let rafLastTimestamp = null;
-
-    // Pre-start: seek all videos to 0 and pause
-    Promise.all(videos.map(v => {
-      v.pause();
-      v.currentTime = 0;
-      return new Promise(res => { v.onseeked = res; });
-    })).then(() => {
-      setStage('Stitch', 'running', 'Rendering scenes...', 15);
-      requestAnimationFrame(renderFrameAccurate);
-    });
-
-    function renderFrameAccurate(timestamp) {
-      if (rafLastTimestamp === null) rafLastTimestamp = timestamp;
-      const dt = (timestamp - rafLastTimestamp) / 1000;
-      rafLastTimestamp = timestamp;
-      rafGlobalTime += dt;
-
-      if (rafGlobalTime >= totalDuration) {
         recorder.stop();
         setStage('Stitch', 'running', 'Encoding...', 95);
         return;
@@ -415,15 +345,16 @@ async function stitchScenes(clipData, dims) {
 
       for (let i = 0; i < timeline.length; i++) {
         const t = timeline[i];
-        if (rafGlobalTime < t.start || rafGlobalTime >= t.end) continue;
+        if (globalTime < t.start || globalTime >= t.end) continue;
 
-        const localTime = rafGlobalTime - t.start;
+        const localTime = globalTime - t.start;
         const sceneDur = sceneDurations[i];
         const video = videos[i];
 
-        // Seek video to local time
+        // Seek video to match global timeline position
         video.currentTime = Math.min(localTime, video.duration - 0.01);
 
+        // Calculate crossfade alpha
         let alpha = 1;
         if (i > 0 && localTime < crossfadeDur) {
           alpha = localTime / crossfadeDur;
@@ -437,6 +368,7 @@ async function stitchScenes(clipData, dims) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         ctx.globalAlpha = 1;
 
+        // Text overlay
         if (clipData[i].overlay) {
           const overlayFade = 0.3;
           let textAlpha = 1;
@@ -447,10 +379,12 @@ async function stitchScenes(clipData, dims) {
         }
       }
 
-      const pct = Math.round((rafGlobalTime / totalDuration) * 100);
+      const pct = Math.round((globalTime / totalDuration) * 100);
       setStage('Stitch', 'running', `Rendering: ${pct}%`, 15 + Math.round(pct * 0.8));
-      requestAnimationFrame(renderFrameAccurate);
+      requestAnimationFrame(render);
     }
+
+    requestAnimationFrame(render);
   });
 }
 
