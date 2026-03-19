@@ -113,6 +113,13 @@
   .btn-start-over { width: 100%; padding: 0.7rem; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-family: 'Inter', system-ui, sans-serif; font-weight: 500; font-size: 13px; cursor: pointer; margin-top: 0.75rem; transition: border-color 0.2s, color 0.2s; }
   .btn-start-over:hover { border-color: var(--accent); color: var(--text); }
 
+  /* Hook template picker */
+  .hook-picker { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin-top: 0.5rem; max-height: 260px; overflow-y: auto; }
+  .hook-category { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-top: 0.6rem; margin-bottom: 0.3rem; }
+  .hook-category:first-child { margin-top: 0; }
+  .hook-option { padding: 0.4rem 0.6rem; font-size: 12px; color: var(--text); cursor: pointer; border-radius: 6px; transition: background 0.15s; margin-bottom: 2px; }
+  .hook-option:hover { background: var(--accent-dim); color: var(--accent-light); }
+
   @media (max-width: 520px) {
     body { padding: 1rem 0.5rem; }
     .grid-2, .grid-3 { grid-template-columns: 1fr; }
@@ -187,6 +194,11 @@
   <div class="card-title"><span class="step">2</span> Scenes</div>
   <p style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">Build your ad story in 3-4 scenes. Each scene generates an image, animates it, and displays overlay text.</p>
 
+  <div id="briefToolbar" style="display:flex;gap:8px;align-items:center;margin-bottom:1rem">
+    <button class="btn-sm btn-outline" id="generateBriefBtn" onclick="generateBrief()" style="background:var(--accent-dim)">Generate Ad Brief</button>
+    <span id="briefStatus" style="font-size:11px;color:var(--text-muted);display:none"></span>
+  </div>
+
   <div id="scenesContainer"></div>
 
   <button class="btn-sm btn-outline" id="addSceneBtn" onclick="addScene()" style="margin-top:0.5rem">+ Add Scene</button>
@@ -257,6 +269,6 @@
   <button class="btn-start-over" id="startOverBtn" onclick="startOver()" style="display:none">Start Over</button>
 </div>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

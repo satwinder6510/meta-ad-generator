@@ -23,6 +23,76 @@ const OVERLAY_STYLES = {
 
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
+// ── Creative Director system prompt ───────────
+
+const BRIEF_SYSTEM_PROMPT = `You are a Creative Director specializing in Meta/Facebook video ads. You understand Facebook's algorithm priorities:
+
+- **3-second rule**: The first 3 seconds determine whether a user stops scrolling. Scene 1 MUST have a visually striking image and bold overlay text that creates curiosity or urgency.
+- **Sound-off optimization**: 85%+ of Facebook video is watched without sound. Every scene MUST have overlay text that tells the story visually.
+- **Hook-first structure**: Lead with the most compelling visual/claim. Don't save the best for last.
+- **Emotional arc**: Scene 1 = attention/curiosity, Scene 2 = problem/desire, Scene 3 = solution/proof, Scene 4 (if present) = CTA/urgency.
+- **Short attention spans**: Keep each scene punchy. Prefer 5s scenes for Stories/Reels formats.
+- **Platform-native feel**: Match the format context (vertical = Stories/Reels energy, landscape = Feed polish, square = versatile).
+
+Given the business info, audience, objective, format, and scene count, generate a complete ad brief as a JSON array.`;
+
+// ── Format-aware defaults ─────────────────────
+
+const FORMAT_DEFAULTS = {
+  '9:16': { pos: 'bottom', style: 'bold',      size: 'large',  duration: '5',  anim: 'slide-up' },
+  '16:9': { pos: 'centre', style: 'clean',     size: 'medium', duration: '5',  anim: 'fade' },
+  '1:1':  { pos: 'centre', style: 'clean',     size: 'medium', duration: '5',  anim: 'fade' },
+  '21:9': { pos: 'bottom', style: 'cinematic', size: 'medium', duration: '8',  anim: 'fade' },
+  '4:3':  { pos: 'centre', style: 'clean',     size: 'medium', duration: '5',  anim: 'fade' },
+  '3:4':  { pos: 'bottom', style: 'bold',      size: 'large',  duration: '5',  anim: 'slide-up' },
+};
+const HOOK_SCENE_OVERRIDE = { style: 'bold', size: 'large' };
+
+// ── Hook templates library ────────────────────
+
+const HOOK_TEMPLATES = {
+  question: {
+    label: 'Question Hooks',
+    templates: [
+      'Did you know {fact}?',
+      'What if you could {benefit}?',
+      'Still doing {old way}?',
+      'Want to {desire}?',
+      'Tired of {pain point}?',
+    ]
+  },
+  number: {
+    label: 'Number Hooks',
+    templates: [
+      '3 reasons why {topic}',
+      'The #1 mistake in {area}',
+      '97% of people get this wrong',
+      '{number}x faster results',
+      'In just {timeframe}...',
+    ]
+  },
+  challenge: {
+    label: 'Challenge Hooks',
+    templates: [
+      'Stop doing {bad habit}',
+      'You\'re wrong about {topic}',
+      'Nobody talks about this',
+      'This changes everything',
+      'Watch before you {action}',
+    ]
+  },
+  benefit: {
+    label: 'Benefit Hooks',
+    templates: [
+      'How to {result} in {time}',
+      'The secret to {benefit}',
+      'Finally, a way to {desire}',
+      'From {before} to {after}',
+      '{Result} without {sacrifice}',
+    ]
+  },
+};
+
 // ── Error handler ────────────────────────────
 
 window.onerror = function(msg, src, line) {
@@ -43,6 +113,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Start with 3 default scenes
   for (let i = 0; i < MIN_SCENES; i++) addScene();
+
+  // Format change → apply smart defaults
+  document.getElementById('adFormat').addEventListener('change', function() {
+    applyFormatDefaults(this.value);
+  });
 });
 
 // ── Scene management ─────────────────────────
@@ -52,6 +127,7 @@ function addScene() {
   const id = Date.now() + '-' + Math.random().toString(36).slice(2, 6);
   scenes.push({ id });
   renderScenes();
+  applyFormatDefaults(document.getElementById('adFormat').value);
 }
 
 function removeScene(id) {
@@ -103,8 +179,12 @@ function renderScenes() {
 
       <div class="grid-2">
         <div class="field">
-          <label>Overlay Text</label>
-          <input type="text" id="overlay-${scene.id}" placeholder="Text shown during this scene" />
+          <label>Overlay Text${i === 0 ? ' <span style="color:var(--orange);font-weight:400;text-transform:none;letter-spacing:0">(Hook Scene)</span>' : ''}</label>
+          <div style="display:flex;gap:6px;align-items:start">
+            <input type="text" id="overlay-${scene.id}" placeholder="${i === 0 ? 'Your scroll-stopping hook...' : 'Text shown during this scene'}" oninput="markOverlayDirty('${scene.id}')" style="flex:1" />
+            ${i === 0 ? `<button class="btn-sm btn-outline" onclick="toggleHookPicker('${scene.id}')" style="white-space:nowrap;flex-shrink:0" title="Hook Templates">Hooks</button>` : ''}
+          </div>
+          ${i === 0 ? `<div id="hookPicker-${scene.id}" class="hook-picker" style="display:none"></div>` : ''}
         </div>
         <div class="field">
           <label>Overlay Position</label>
@@ -216,6 +296,202 @@ function restoreAllSceneValues(values) {
       if (radio) { radio.checked = true; toggleSceneSource(id); }
     }
   });
+}
+
+// ── Creative Director: Generate Brief ─────────
+
+async function generateBrief() {
+  const anthropicKey = document.getElementById('anthropicKey').value.trim();
+  const businessName = document.getElementById('businessName').value.trim();
+  if (!anthropicKey) { alert('Please enter your Anthropic API key to generate a brief'); return; }
+  if (!businessName) { alert('Please enter a business/product name to generate a brief'); return; }
+
+  const targetAudience = document.getElementById('targetAudience').value.trim() || 'general audience';
+  const adObjective = document.getElementById('adObjective').value;
+  const adFormat = document.getElementById('adFormat').value;
+  const offer = document.getElementById('offerHook').value.trim();
+  const sceneCount = scenes.length;
+
+  const formatContext = {
+    '16:9': 'Facebook/Instagram Feed (landscape, polished, editorial feel)',
+    '9:16': 'Instagram Stories/Reels (vertical, fast-paced, native energy, mobile-first)',
+    '1:1':  'Facebook/Instagram Feed (square, versatile, works in both feeds)',
+    '4:3':  'Facebook Feed (classic landscape, slightly taller than 16:9)',
+    '3:4':  'Instagram Feed (portrait, more vertical space for text)',
+    '21:9': 'Facebook Feed (ultra-wide cinematic, immersive, minimal text space)',
+  };
+
+  const btn = document.getElementById('generateBriefBtn');
+  const statusEl = document.getElementById('briefStatus');
+  btn.disabled = true;
+  btn.textContent = 'Generating Brief...';
+  statusEl.style.display = 'inline';
+  statusEl.style.color = 'var(--text-muted)';
+  statusEl.textContent = 'Claude is planning your ad...';
+
+  const userPrompt = `Generate a ${sceneCount}-scene video ad brief.
+
+Business/Product: ${businessName}
+Target Audience: ${targetAudience}
+Ad Objective: ${adObjective}
+Format: ${adFormat} — ${formatContext[adFormat] || 'Standard'}
+${offer ? `Offer/Hook: ${offer}` : 'No specific offer — create a compelling hook'}
+
+Return ONLY a valid JSON array with exactly ${sceneCount} objects. Each object must have:
+{
+  "description": "Detailed image generation prompt (what Flux AI should render — be specific about composition, lighting, mood, subject, colors)",
+  "motion": "Camera/motion prompt for video animation (e.g. 'slow zoom in with gentle parallax', 'smooth pan right revealing product')",
+  "overlay": "Overlay text for this scene (concise, impactful, readable at a glance)",
+  "overlayPos": "top" | "centre" | "bottom",
+  "overlayStyle": "clean" | "bold" | "cinematic" | "minimal" | "highlight" | "subtitle",
+  "overlaySize": "small" | "medium" | "large",
+  "overlayAnim": "fade" | "slide-up" | "typewriter",
+  "duration": "5" | "8" | "10"
+}
+
+Rules:
+- Scene 1 is the HOOK scene: use bold/highlight style, large size, bottom position for vertical or centre for landscape
+- Scene descriptions should be photorealistic, no text in the image (text comes from overlay)
+- Motion prompts should be subtle and cinematic, not jarring
+- Overlay text must work with sound off — tell the complete story through text
+- Keep overlay text to 6 words max per scene for readability
+- Duration: prefer 5s for ${adFormat === '9:16' ? 'Stories/Reels' : 'most formats'}, 8s only for establishing shots`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1200,
+        system: BRIEF_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    });
+
+    if (!res.ok) throw new Error('Claude API error ' + res.status);
+    const data = await res.json();
+    const text = data.content[0].text.replace(/```json|```/g, '').trim();
+    const brief = JSON.parse(text);
+
+    if (!Array.isArray(brief) || brief.length !== sceneCount) {
+      throw new Error(`Expected ${sceneCount} scenes, got ${Array.isArray(brief) ? brief.length : 'non-array'}`);
+    }
+
+    applyBrief(brief);
+    statusEl.textContent = 'Brief applied! Review and edit before generating.';
+    statusEl.style.color = 'var(--green)';
+    setTimeout(() => { statusEl.style.display = 'none'; statusEl.style.color = 'var(--text-muted)'; }, 4000);
+
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.style.color = 'var(--error)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate Ad Brief';
+  }
+}
+
+function applyBrief(brief) {
+  scenes.forEach((scene, i) => {
+    if (!brief[i]) return;
+    const id = scene.id;
+    const b = brief[i];
+
+    // Ensure "Generate with AI" is selected
+    const aiRadio = document.querySelector(`input[name="imgSrc-${id}"][value="ai"]`);
+    if (aiRadio) { aiRadio.checked = true; toggleSceneSource(id); }
+
+    if (document.getElementById(`desc-${id}`))         document.getElementById(`desc-${id}`).value = b.description || '';
+    if (document.getElementById(`motion-${id}`))       document.getElementById(`motion-${id}`).value = b.motion || '';
+    if (document.getElementById(`overlay-${id}`))      document.getElementById(`overlay-${id}`).value = b.overlay || '';
+    if (document.getElementById(`overlayPos-${id}`))   document.getElementById(`overlayPos-${id}`).value = b.overlayPos || 'centre';
+    if (document.getElementById(`overlayStyle-${id}`)) document.getElementById(`overlayStyle-${id}`).value = b.overlayStyle || 'clean';
+    if (document.getElementById(`overlaySize-${id}`))  document.getElementById(`overlaySize-${id}`).value = b.overlaySize || 'medium';
+    if (document.getElementById(`overlayAnim-${id}`))  document.getElementById(`overlayAnim-${id}`).value = b.overlayAnim || 'fade';
+    if (document.getElementById(`duration-${id}`))     document.getElementById(`duration-${id}`).value = b.duration || '5';
+
+    scene._overlayDirty = true;
+  });
+}
+
+// ── Format-aware smart defaults ───────────────
+
+function applyFormatDefaults(format) {
+  const defaults = FORMAT_DEFAULTS[format];
+  if (!defaults) return;
+
+  scenes.forEach((scene, i) => {
+    const id = scene.id;
+    const overlayField = document.getElementById(`overlay-${id}`);
+
+    // Skip if user/brief has already set overlay content
+    if (overlayField && overlayField.value.trim() !== '' && scene._overlayDirty) return;
+
+    if (document.getElementById(`overlayPos-${id}`))   document.getElementById(`overlayPos-${id}`).value = defaults.pos;
+    if (document.getElementById(`overlayStyle-${id}`))  document.getElementById(`overlayStyle-${id}`).value = defaults.style;
+    if (document.getElementById(`overlaySize-${id}`))   document.getElementById(`overlaySize-${id}`).value = defaults.size;
+    if (document.getElementById(`overlayAnim-${id}`))   document.getElementById(`overlayAnim-${id}`).value = defaults.anim;
+    if (document.getElementById(`duration-${id}`))      document.getElementById(`duration-${id}`).value = defaults.duration;
+
+    // Scene 1 always gets hook treatment
+    if (i === 0) {
+      if (document.getElementById(`overlayStyle-${id}`)) document.getElementById(`overlayStyle-${id}`).value = HOOK_SCENE_OVERRIDE.style;
+      if (document.getElementById(`overlaySize-${id}`))  document.getElementById(`overlaySize-${id}`).value = HOOK_SCENE_OVERRIDE.size;
+    }
+  });
+}
+
+function markOverlayDirty(sceneId) {
+  const scene = scenes.find(s => s.id === sceneId);
+  if (scene) scene._overlayDirty = true;
+}
+
+// ── Hook templates picker ─────────────────────
+
+function toggleHookPicker(sceneId) {
+  const picker = document.getElementById(`hookPicker-${sceneId}`);
+  if (!picker) return;
+
+  if (picker.style.display === 'none') {
+    // Lazy-render templates on first open
+    if (!picker.innerHTML) {
+      let html = '';
+      for (const [catKey, cat] of Object.entries(HOOK_TEMPLATES)) {
+        html += `<div class="hook-category">${cat.label}</div>`;
+        cat.templates.forEach(t => {
+          const escaped = t.replace(/'/g, "\\'");
+          html += `<div class="hook-option" onclick="selectHook('${sceneId}','${escaped}')">${t}</div>`;
+        });
+      }
+      picker.innerHTML = html;
+    }
+    picker.style.display = 'block';
+  } else {
+    picker.style.display = 'none';
+  }
+}
+
+function selectHook(sceneId, template) {
+  const field = document.getElementById(`overlay-${sceneId}`);
+  if (field) {
+    field.value = template;
+    field.focus();
+    // Auto-select first {placeholder} for immediate editing
+    const match = template.match(/\{[^}]+\}/);
+    if (match) {
+      const start = template.indexOf(match[0]);
+      field.setSelectionRange(start, start + match[0].length);
+    }
+    markOverlayDirty(sceneId);
+  }
+  const picker = document.getElementById(`hookPicker-${sceneId}`);
+  if (picker) picker.style.display = 'none';
 }
 
 // ── Helpers ───────────────────────────────────
