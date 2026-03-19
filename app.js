@@ -221,9 +221,57 @@ async function falRun(endpoint, input, apiKey, onProgress) {
   return result;
 }
 
-async function uploadImageToFal(file, apiKey) {
+// Resize and crop uploaded image to target dimensions before uploading.
+// Ensures Seedance gets a sharp, correctly-proportioned input image.
+function prepareImage(file, targetW, targetH) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+
+      // Cover crop: scale image to fill target, then center-crop
+      const srcRatio = img.width / img.height;
+      const tgtRatio = targetW / targetH;
+      let sx, sy, sw, sh;
+      if (srcRatio > tgtRatio) {
+        // Source is wider — crop sides
+        sh = img.height;
+        sw = img.height * tgtRatio;
+        sx = (img.width - sw) / 2;
+        sy = 0;
+      } else {
+        // Source is taller — crop top/bottom
+        sw = img.width;
+        sh = img.width / tgtRatio;
+        sx = 0;
+        sy = (img.height - sh) / 2;
+      }
+
+      // Use high-quality smoothing for upscaling
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH);
+
+      canvas.toBlob(blob => {
+        if (!blob) return reject(new Error('Failed to export resized image'));
+        // Preserve original filename with .png extension
+        const name = file.name.replace(/\.[^.]+$/, '') + '-resized.png';
+        resolve(new File([blob], name, { type: 'image/png' }));
+      }, 'image/png');
+    };
+    img.onerror = () => reject(new Error('Failed to load uploaded image'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function uploadImageToFal(file, apiKey, dims) {
+  // Resize/crop to target dimensions if dims provided
+  const prepared = dims ? await prepareImage(file, dims.w, dims.h) : file;
   const fal = await getFalClient(apiKey);
-  return await fal.storage.upload(file);
+  return await fal.storage.upload(prepared);
 }
 
 // ── Canvas text overlay ──────────────────────
@@ -586,8 +634,8 @@ async function startPipeline() {
     // Step 1: Get image URL
     let imageUrl;
     if (scene.isUpload) {
-      setSceneStage(i, 'running', 'Uploading image...', 10);
-      imageUrl = await uploadImageToFal(scene.file, falKey);
+      setSceneStage(i, 'running', 'Resizing image...', 5);
+      imageUrl = await uploadImageToFal(scene.file, falKey, dims);
       setSceneStage(i, 'running', 'Image uploaded, generating video...', 25);
     } else {
       setSceneStage(i, 'running', 'Generating image...', 10);
