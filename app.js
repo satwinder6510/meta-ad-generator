@@ -3,6 +3,82 @@
 // Multi-scene pipeline: per-scene (Flux + Seedance) → Canvas stitch → R2 upload → Claude copy
 // ─────────────────────────────────────────────
 
+// ── Logging ──────────────────────────────────
+
+const _logs = [];
+let _logErrorCount = 0;
+
+function _ts() {
+  const d = new Date();
+  return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+function log(level, ...args) {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+  const entry = { time: _ts(), level, msg };
+  _logs.push(entry);
+  if (level === 'error') _logErrorCount++;
+
+  // Console mirror
+  const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+  fn(`[${entry.time}] [${level.toUpperCase()}]`, ...args);
+
+  // DOM update
+  const body = document.getElementById('logBody');
+  if (body) {
+    const div = document.createElement('div');
+    div.className = `log-entry log-${level}`;
+    div.innerHTML = `<span class="log-time">${entry.time}</span>${escapeHtml(msg)}`;
+    body.appendChild(div);
+    div.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }
+  const countEl = document.getElementById('logCount');
+  if (countEl) countEl.textContent = _logs.length;
+  const errEl = document.getElementById('logErrorCount');
+  if (errEl) {
+    errEl.textContent = _logErrorCount;
+    errEl.style.display = _logErrorCount > 0 ? 'inline' : 'none';
+  }
+  // Auto-open on errors
+  if (level === 'error') {
+    const b = document.getElementById('logBody');
+    if (b && !b.classList.contains('open')) b.classList.add('open');
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toggleLogPanel() {
+  const body = document.getElementById('logBody');
+  if (body) body.classList.toggle('open');
+}
+
+function copyLogs() {
+  const text = _logs.map(e => `[${e.time}] [${e.level.toUpperCase()}] ${e.msg}`).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('#logPanel .log-actions .btn-sm');
+    if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); }
+  });
+}
+
+function clearLogs() {
+  _logs.length = 0;
+  _logErrorCount = 0;
+  const body = document.getElementById('logBody');
+  if (body) body.innerHTML = '';
+  const countEl = document.getElementById('logCount');
+  if (countEl) countEl.textContent = '0';
+  const errEl = document.getElementById('logErrorCount');
+  if (errEl) { errEl.textContent = '0'; errEl.style.display = 'none'; }
+}
+
+function maskKey(key) {
+  if (!key || key.length < 10) return '***';
+  return key.slice(0, 6) + '...' + key.slice(-4);
+}
+
 // ── State ────────────────────────────────────
 
 let scenes = [];
@@ -96,32 +172,37 @@ const HOOK_TEMPLATES = {
 
 // ── Error handler ────────────────────────────
 
-window.onerror = function(msg, src, line) {
-  const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:12px 16px;background:#dc2626;color:#fff;font-size:13px;z-index:9999';
-  el.textContent = 'JS Error: ' + msg + ' (line ' + line + ')';
-  document.body.prepend(el);
+window.onerror = function(msg, src, line, col, err) {
+  log('error', `Uncaught: ${msg} at line ${line}:${col}${err?.stack ? '\n' + err.stack : ''}`);
+};
+
+window.onunhandledrejection = function(e) {
+  log('error', `Unhandled promise rejection: ${e.reason?.message || e.reason}${e.reason?.stack ? '\n' + e.reason.stack : ''}`);
 };
 
 // ── Init ─────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  log('info', 'Meta Ad Generator initialised');
   try {
-    // Restore worker URL from localStorage
     const saved = localStorage.getItem('meta-ad-worker-url');
-    if (saved) document.getElementById('workerUrl').value = saved;
-  } catch(e) { /* localStorage may be blocked in private mode */ }
+    if (saved) {
+      document.getElementById('workerUrl').value = saved;
+      log('debug', `Restored Worker URL: ${saved}`);
+    }
+  } catch(e) { log('warn', 'localStorage unavailable — private mode?'); }
 
-  // Start with 3 default scenes
   for (let i = 0; i < MIN_SCENES; i++) addScene();
 
-  // Format change → apply smart defaults
   document.getElementById('adFormat').addEventListener('change', function() {
+    log('info', `Format changed → ${this.value}`);
     applyFormatDefaults(this.value);
   });
 
-  // Product image upload
   document.getElementById('productImageInput').addEventListener('change', handleProductImageUpload);
+
+  log('info', `Browser: ${navigator.userAgent.split(') ').pop()}`);
+  log('info', `MediaRecorder VP9: ${MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'yes' : 'no'}`);
 });
 
 // ── Scene management ─────────────────────────
@@ -397,15 +478,22 @@ async function generateBrief() {
   if (brandUrl && workerUrl) {
     try {
       statusEl.textContent = 'Reading brand website...';
+      log('info', `Fetching brand website via proxy: ${brandUrl}`);
       const proxyRes = await fetch(`${workerUrl.replace(/\/$/, '')}/proxy?url=${encodeURIComponent(brandUrl)}`);
       if (proxyRes.ok) {
         const proxyData = await proxyRes.json();
         if (proxyData.text && !proxyData.error) {
           brandContext = `\nBrand Website Context (from ${proxyData.title || brandUrl}):\n${proxyData.text}\n\nUse this to match the brand's tone, vocabulary, and positioning in scene descriptions and overlay text.\n`;
+          pipeline.brandContext = brandContext;
+          log('success', `Brand website scraped: "${proxyData.title}" (${proxyData.text.length} chars)`);
+        } else {
+          log('warn', `Brand proxy returned empty/error: ${proxyData.error || 'no text'}`);
         }
+      } else {
+        log('warn', `Brand proxy HTTP ${proxyRes.status}`);
       }
     } catch (e) {
-      // Silently skip — don't block brief generation
+      log('warn', `Brand website fetch failed (non-blocking): ${e.message}`);
     }
   }
 
@@ -446,6 +534,8 @@ Rules:
 - Duration: prefer 5s for ${adFormat === '9:16' ? 'Stories/Reels' : 'most formats'}, 8s only for establishing shots`;
 
   try {
+    log('info', `Claude brief → model=claude-sonnet-4-20250514, key=${maskKey(anthropicKey)}, scenes=${sceneCount}`);
+    const t0 = performance.now();
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -462,21 +552,38 @@ Rules:
       }),
     });
 
-    if (!res.ok) throw new Error('Claude API error ' + res.status);
+    const dur = ((performance.now() - t0) / 1000).toFixed(1);
+    if (!res.ok) {
+      const errBody = await res.text();
+      log('error', `Claude brief ← HTTP ${res.status} after ${dur}s: ${errBody}`);
+      throw new Error('Claude API error ' + res.status);
+    }
     const data = await res.json();
+    log('success', `Claude brief ← ${dur}s, usage: ${JSON.stringify(data.usage || {})}`);
     const text = data.content[0].text.replace(/```json|```/g, '').trim();
-    const brief = JSON.parse(text);
+    log('debug', `Claude brief raw response:\n${text.slice(0, 500)}${text.length > 500 ? '...' : ''}`);
+
+    let brief;
+    try {
+      brief = JSON.parse(text);
+    } catch (parseErr) {
+      log('error', `Brief JSON parse failed: ${parseErr.message}\nRaw text: ${text}`);
+      throw parseErr;
+    }
 
     if (!Array.isArray(brief) || brief.length !== sceneCount) {
+      log('error', `Brief shape mismatch: expected array[${sceneCount}], got ${typeof brief}${Array.isArray(brief) ? '[' + brief.length + ']' : ''}`);
       throw new Error(`Expected ${sceneCount} scenes, got ${Array.isArray(brief) ? brief.length : 'non-array'}`);
     }
 
     applyBrief(brief);
+    log('success', `Brief applied: ${brief.map((s, i) => `S${i + 1}: "${(s.overlay || '').slice(0, 30)}"`).join(', ')}`);
     statusEl.textContent = 'Brief applied! Review and edit before generating.';
     statusEl.style.color = 'var(--green)';
     setTimeout(() => { statusEl.style.display = 'none'; statusEl.style.color = 'var(--text-muted)'; }, 4000);
 
   } catch (e) {
+    log('error', `generateBrief failed: ${e.message}`);
     statusEl.textContent = 'Error: ' + e.message;
     statusEl.style.color = 'var(--error)';
   } finally {
@@ -623,8 +730,15 @@ function setStage(id, status, msg, progress) {
 
 async function getFalClient(apiKey) {
   if (!falClient) {
-    const mod = await import('https://esm.sh/@fal-ai/client');
-    falClient = mod.fal;
+    log('info', 'Loading fal.ai client from esm.sh...');
+    try {
+      const mod = await import('https://esm.sh/@fal-ai/client');
+      falClient = mod.fal;
+      log('success', 'fal.ai client loaded');
+    } catch (e) {
+      log('error', `Failed to load fal.ai client: ${e.message}`);
+      throw e;
+    }
   }
   falClient.config({ credentials: apiKey });
   return falClient;
@@ -632,16 +746,29 @@ async function getFalClient(apiKey) {
 
 async function falRun(endpoint, input, apiKey, onProgress) {
   const fal = await getFalClient(apiKey);
+  const inputSummary = { ...input };
+  if (inputSummary.image_url) inputSummary.image_url = inputSummary.image_url.slice(0, 60) + '...';
+  log('info', `fal.ai → ${endpoint}`, inputSummary);
+  const t0 = performance.now();
   let attempt = 0;
-  const result = await fal.subscribe(endpoint, {
-    input,
-    pollInterval: 3000,
-    onQueueUpdate: () => {
-      attempt++;
-      if (onProgress) onProgress(Math.min(15 + attempt * 3, 88));
-    }
-  });
-  return result;
+  try {
+    const result = await fal.subscribe(endpoint, {
+      input,
+      pollInterval: 3000,
+      onQueueUpdate: (update) => {
+        attempt++;
+        log('debug', `fal.ai poll #${attempt} for ${endpoint}: ${update?.status || 'polling'}`);
+        if (onProgress) onProgress(Math.min(15 + attempt * 3, 88));
+      }
+    });
+    const dur = ((performance.now() - t0) / 1000).toFixed(1);
+    log('success', `fal.ai ← ${endpoint} done in ${dur}s`);
+    return result;
+  } catch (e) {
+    const dur = ((performance.now() - t0) / 1000).toFixed(1);
+    log('error', `fal.ai ← ${endpoint} FAILED after ${dur}s: ${e.message}${e.body ? '\n' + JSON.stringify(e.body) : ''}`);
+    throw e;
+  }
 }
 
 // Resize and crop uploaded image to target dimensions before uploading.
@@ -691,10 +818,17 @@ function prepareImage(file, targetW, targetH) {
 }
 
 async function uploadImageToFal(file, apiKey, dims) {
-  // Resize/crop to target dimensions if dims provided
   const prepared = dims ? await prepareImage(file, dims.w, dims.h) : file;
+  log('info', `fal.ai storage upload: ${prepared.name} (${(prepared.size / 1024).toFixed(0)}KB)`);
   const fal = await getFalClient(apiKey);
-  return await fal.storage.upload(prepared);
+  try {
+    const url = await fal.storage.upload(prepared);
+    log('success', `fal.ai storage ← ${url.slice(0, 60)}...`);
+    return url;
+  } catch (e) {
+    log('error', `fal.ai storage upload failed: ${e.message}`);
+    throw e;
+  }
 }
 
 // ── Canvas text overlay ──────────────────────
@@ -807,7 +941,7 @@ function drawTextOverlay(ctx, text, alpha, cW, cH, position, styleName, sizeName
 // ── Canvas stitching engine ──────────────────
 
 async function stitchScenes(clipData, dims) {
-  // clipData: array of { blobUrl, overlay, overlayPos, duration }
+  log('info', `=== STITCHING START: ${clipData.length} clips, ${dims.w}x${dims.h} ===`);
   setStage('Stitch', 'running', 'Loading clips...', 5);
 
   // Load all clips as video elements
@@ -847,10 +981,10 @@ async function stitchScenes(clipData, dims) {
     cursor = end - crossfadeDur; // next scene starts crossfadeDur before this one ends
   }
 
-  // Set up MediaRecorder
   const stream = canvas.captureStream(30);
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
     ? 'video/webm;codecs=vp9' : 'video/webm';
+  log('info', `MediaRecorder: ${mimeType}, 6Mbps, ${dims.w}x${dims.h}@30fps`);
   const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6000000 });
   const chunks = [];
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
@@ -858,7 +992,13 @@ async function stitchScenes(clipData, dims) {
   return new Promise((resolve, reject) => {
     recorder.onstop = () => {
       clipData.forEach(c => URL.revokeObjectURL(c.blobUrl));
-      resolve(new Blob(chunks, { type: mimeType }));
+      const finalBlob = new Blob(chunks, { type: mimeType });
+      log('success', `=== STITCHING COMPLETE: ${(finalBlob.size / 1024 / 1024).toFixed(1)}MB, ${mimeType} ===`);
+      resolve(finalBlob);
+    };
+
+    recorder.onerror = (e) => {
+      log('error', `MediaRecorder error: ${e.error?.message || e.error || 'unknown'}`);
     };
 
     let globalTime = 0;
@@ -940,9 +1080,12 @@ async function stitchScenes(clipData, dims) {
 async function uploadToR2(blob, workerUrl) {
   if (!workerUrl) return null;
 
+  const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+  log('info', `R2 upload → ${workerUrl}/upload (${sizeMB}MB, ${blob.type})`);
   setStage('Upload', 'running', 'Uploading to R2...', 30);
 
   const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+  const t0 = performance.now();
   const res = await fetch(workerUrl.replace(/\/$/, '') + '/upload', {
     method: 'POST',
     headers: {
@@ -952,42 +1095,62 @@ async function uploadToR2(blob, workerUrl) {
     body: blob,
   });
 
+  const dur = ((performance.now() - t0) / 1000).toFixed(1);
   if (!res.ok) {
     const text = await res.text();
+    log('error', `R2 upload ← HTTP ${res.status} after ${dur}s: ${text}`);
     throw new Error(`Upload failed (${res.status}): ${text}`);
   }
 
   const data = await res.json();
+  log('success', `R2 upload ← ${dur}s, key=${data.key}, url=${data.url?.slice(0, 60)}...`);
   setStage('Upload', 'done', 'Uploaded to R2', 100);
   return data.url;
 }
 
 // ── Claude ad copy ───────────────────────────
 
-async function generateCopy(businessName, targetAudience, adObjective, offer, sceneDescriptions, anthropicKey) {
-  const offerLine = offer ? `\nOffer/Hook: ${offer}` : '';
-  const scenesText = sceneDescriptions.map((d, i) => `Scene ${i + 1}: ${d}`).join('\n');
+async function generateCopy(businessName, targetAudience, adObjective, offer, clips, anthropicKey) {
+  const scenesText = clips.map((c, i) => {
+    const parts = [`Scene ${i + 1}:`];
+    if (c.overlay) parts.push(`Overlay text: "${c.overlay}"`);
+    if (c.description && c.description !== 'Uploaded image') parts.push(`Visual: ${c.description}`);
+    return parts.join(' ');
+  }).join('\n');
 
-  const prompt = `You are an expert Facebook ad copywriter.
+  const brandUrl = document.getElementById('brandUrl').value.trim();
+  const brandLine = brandUrl ? `\nBrand Website: ${brandUrl}` : '';
+  const brandContextBlock = pipeline.brandContext
+    ? `\n${pipeline.brandContext}`
+    : '';
 
-Write Facebook ad copy for this video ad:
+  const prompt = `You are an expert Facebook ad copywriter. Write copy that speaks DIRECTLY to the target audience and sells the specific product/offer described below.
 
 Business/Product: ${businessName}
 Target Audience: ${targetAudience}
-Ad Objective: ${adObjective}${offerLine}
+Ad Objective: ${adObjective}
+${offer ? `Offer/Hook: ${offer}` : 'No specific offer provided — create a compelling value proposition'}${brandLine}${brandContextBlock}
 
-The video ad has these scenes:
+The video ad tells this story:
 ${scenesText}
+
+IMPORTANT:
+- The primary text MUST reference the specific business "${businessName}" and speak to "${targetAudience}"
+- ${offer ? `Feature the offer "${offer}" prominently` : 'Create a specific, compelling reason to act now'}
+- The headline must be about THIS product/business, not generic
+- Match the brand's tone if brand context is provided above
 
 Return ONLY valid JSON — no markdown, no preamble:
 {
-  "primaryText": "Main ad copy, 2-3 sentences, emotional, ends with soft CTA",
-  "headline": "Punchy headline, max 7 words",
-  "description": "One benefit line, max 12 words",
+  "primaryText": "2-3 sentences. Speak directly to the target audience. Reference the business by name. End with a clear CTA.",
+  "headline": "Punchy headline about THIS business, max 7 words",
+  "description": "One specific benefit of THIS product, max 12 words",
   "cta": "One of: Book Now, Learn More, Shop Now, Sign Up, Get Offer, Contact Us",
-  "hook": "Opening 3-4 words that stop the scroll"
+  "hook": "Opening 3-4 words that stop the scroll for THIS audience"
 }`;
 
+  log('info', `Claude ad copy → model=claude-sonnet-4-20250514, key=${maskKey(anthropicKey)}, scenes=${clips.length}`);
+  const t0 = performance.now();
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -1003,10 +1166,26 @@ Return ONLY valid JSON — no markdown, no preamble:
     }),
   });
 
-  if (!res.ok) throw new Error('Claude API error ' + res.status);
+  const dur = ((performance.now() - t0) / 1000).toFixed(1);
+  if (!res.ok) {
+    const errBody = await res.text();
+    log('error', `Claude ad copy ← HTTP ${res.status} after ${dur}s: ${errBody}`);
+    throw new Error('Claude API error ' + res.status);
+  }
   const data = await res.json();
+  log('success', `Claude ad copy ← ${dur}s, usage: ${JSON.stringify(data.usage || {})}`);
   const text = data.content[0].text.replace(/```json|```/g, '').trim();
-  return JSON.parse(text);
+  log('debug', `Claude ad copy raw:\n${text}`);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (parseErr) {
+    log('error', `Ad copy JSON parse failed: ${parseErr.message}\nRaw: ${text}`);
+    throw parseErr;
+  }
+  log('success', `Ad copy: headline="${parsed.headline}", cta="${parsed.cta}"`);
+  return parsed;
 }
 
 function renderCopy(copy) {
@@ -1047,6 +1226,7 @@ const pipeline = {
   clipData: [],    // { blobUrl, overlay, overlayPos, duration, description } per scene
   dims: null,      // format dimensions
   totalCost: 0,
+  brandContext: '', // scraped brand website text, persisted across phases
 };
 
 // ── Stage HTML generators ────────────────────
@@ -1130,24 +1310,31 @@ async function generateOneImage(i) {
   const scene = pipeline.sceneData[i];
   const falKey = document.getElementById('falKey').value.trim();
   const dims = pipeline.dims;
+  const label = `Scene ${i + 1} image`;
 
   if (scene.isProduct) {
+    log('info', `${label}: using product image #${scene.productIndex}`);
     setImgStage(i, 'running', 'Preparing product image...', 20);
     const pi = productImages[scene.productIndex];
     if (!pi) throw new Error('Product image not found');
     if (!pi.falUrl) {
+      log('info', `${label}: uploading product image to fal.ai (${pi.file.name}, ${(pi.file.size / 1024).toFixed(0)}KB)`);
       pi.falUrl = await uploadImageToFal(pi.file, falKey, dims);
+      log('success', `${label}: product image uploaded → ${pi.falUrl.slice(0, 60)}...`);
     }
     pipeline.imageUrls[i] = pi.falUrl;
     setImgStage(i, 'done', 'Product image ready', 100);
     showImagePreview(i, pi.falUrl);
   } else if (scene.isUpload) {
+    log('info', `${label}: uploading user image (${scene.file.name}, ${(scene.file.size / 1024).toFixed(0)}KB) → resize to ${dims.w}x${dims.h}`);
     setImgStage(i, 'running', 'Resizing & uploading...', 20);
     const url = await uploadImageToFal(scene.file, falKey, dims);
     pipeline.imageUrls[i] = url;
+    log('success', `${label}: uploaded → ${url.slice(0, 60)}...`);
     setImgStage(i, 'done', 'Image uploaded', 100);
     showImagePreview(i, url);
   } else {
+    log('info', `${label}: generating via Flux Schnell — "${scene.description.slice(0, 80)}${scene.description.length > 80 ? '...' : ''}"`);
     setImgStage(i, 'running', 'Generating image...', 10);
     const result = await falRun('fal-ai/flux/schnell', {
       prompt: scene.description,
@@ -1158,9 +1345,13 @@ async function generateOneImage(i) {
     }, falKey, p => setImgStage(i, 'running', 'Generating...', p));
 
     const url = result?.data?.images?.[0]?.url || result?.images?.[0]?.url;
-    if (!url) throw new Error('No image URL returned');
+    if (!url) {
+      log('error', `${label}: no image URL in response`, result);
+      throw new Error('No image URL returned');
+    }
     pipeline.imageUrls[i] = url;
     pipeline.totalCost += 0.003;
+    log('success', `${label}: generated → ${url.slice(0, 60)}...`);
     setImgStage(i, 'done', 'Image ready', 100);
     showImagePreview(i, url);
   }
@@ -1170,16 +1361,22 @@ async function generateImages() {
   const falKey = document.getElementById('falKey').value.trim();
   if (!falKey) { alert('Please enter your fal.ai API key'); return; }
 
-  // Save worker URL
   const workerUrl = document.getElementById('workerUrl').value.trim();
   if (workerUrl) try { localStorage.setItem('meta-ad-worker-url', workerUrl); } catch(e) {}
 
-  // Collect and validate
   pipeline.sceneData = collectSceneData();
-  pipeline.dims = getFormatDims(document.getElementById('adFormat').value);
+  const format = document.getElementById('adFormat').value;
+  pipeline.dims = getFormatDims(format);
   pipeline.imageUrls = new Array(pipeline.sceneData.length).fill(null);
   pipeline.clipData = [];
   pipeline.totalCost = 0;
+
+  log('info', `=== IMAGE GENERATION START ===`);
+  log('info', `Format: ${format} (${pipeline.dims.w}x${pipeline.dims.h}), Scenes: ${pipeline.sceneData.length}, fal key: ${maskKey(falKey)}`);
+  pipeline.sceneData.forEach((s, i) => {
+    const src = s.isProduct ? `product #${s.productIndex}` : s.isUpload ? `upload (${s.file?.name})` : `AI: "${(s.description || '').slice(0, 50)}"`;
+    log('debug', `  Scene ${i + 1}: ${src}, overlay="${s.overlay}", pos=${s.overlayPos}, style=${s.overlayStyle}, dur=${s.duration}s`);
+  });
 
   for (let i = 0; i < pipeline.sceneData.length; i++) {
     const s = pipeline.sceneData[i];
@@ -1209,21 +1406,23 @@ async function generateImages() {
     pipeline.sceneData.map((_, i) => generateOneImage(i))
   );
 
-  // Check for failures
   let allOk = true;
   results.forEach((r, i) => {
     if (r.status === 'rejected') {
+      log('error', `Scene ${i + 1} image FAILED: ${r.reason?.message || 'Unknown error'}${r.reason?.stack ? '\n' + r.reason.stack : ''}`);
       setImgStage(i, 'error', r.reason?.message || 'Failed', 0);
       allOk = false;
     }
   });
 
-  // Update cost display
+  const ok = results.filter(r => r.status === 'fulfilled').length;
+  const fail = results.length - ok;
+  log(allOk ? 'success' : 'warn', `=== IMAGE GENERATION ${allOk ? 'COMPLETE' : 'PARTIAL'}: ${ok}/${results.length} OK, ${fail} failed, cost ~$${pipeline.totalCost.toFixed(2)} ===`);
+
   document.getElementById('costValue').textContent = `~$${pipeline.totalCost.toFixed(2)}`;
   document.getElementById('costBar').style.display = 'flex';
 
   if (allOk) {
-    // Show approval gate
     document.getElementById('approveImagesBtn').style.display = 'block';
   } else {
     document.getElementById('generateBtn').disabled = false;
@@ -1255,8 +1454,8 @@ async function generateOneVideo(i) {
   const falKey = document.getElementById('falKey').value.trim();
   const dims = pipeline.dims;
   const imageUrl = pipeline.imageUrls[i];
+  const label = `Scene ${i + 1} video`;
 
-  // Re-read motion prompt from scene card (user may have edited)
   const id = scene.id;
   scene.motion = document.getElementById(`motion-${id}`)?.value?.trim() || scene.motion;
   scene.overlay = document.getElementById(`overlay-${id}`)?.value?.trim() || scene.overlay;
@@ -1266,11 +1465,11 @@ async function generateOneVideo(i) {
   scene.overlayAnim = document.getElementById(`overlayAnim-${id}`)?.value || scene.overlayAnim || 'fade';
   scene.duration = document.getElementById(`duration-${id}`)?.value || scene.duration;
 
-  // Product scenes get conservative motion to preserve product integrity
   const motionPrompt = scene.isProduct
     ? 'static product shot, very subtle lighting shift, no morphing or deformation'
     : scene.motion;
 
+  log('info', `${label}: Seedance Lite, duration=${scene.duration}s, motion="${motionPrompt.slice(0, 60)}"`);
   setVidStage(i, 'running', scene.isProduct ? 'Animating (conservative)...' : 'Animating...', 10);
   const vidResult = await falRun('fal-ai/bytedance/seedance/v1/lite/image-to-video', {
     image_url: imageUrl,
@@ -1280,13 +1479,21 @@ async function generateOneVideo(i) {
   }, falKey, p => setVidStage(i, 'running', scene.isProduct ? 'Animating (conservative)...' : 'Animating...', p));
 
   const videoUrl = vidResult?.data?.video?.url || vidResult?.video?.url;
-  if (!videoUrl) throw new Error('No video URL returned');
+  if (!videoUrl) {
+    log('error', `${label}: no video URL in response`, vidResult);
+    throw new Error('No video URL returned');
+  }
   pipeline.totalCost += 0.18;
 
+  log('info', `${label}: downloading clip from ${videoUrl.slice(0, 60)}...`);
   setVidStage(i, 'running', 'Downloading clip...', 92);
   const response = await fetch(videoUrl);
-  if (!response.ok) throw new Error('Failed to download clip');
+  if (!response.ok) {
+    log('error', `${label}: clip download failed HTTP ${response.status}`);
+    throw new Error('Failed to download clip');
+  }
   const blob = await response.blob();
+  log('success', `${label}: clip downloaded (${(blob.size / 1024 / 1024).toFixed(1)}MB, ${blob.type})`);
   const blobUrl = URL.createObjectURL(blob);
 
   pipeline.clipData[i] = {
@@ -1305,16 +1512,15 @@ async function generateOneVideo(i) {
 }
 
 async function approveImages() {
+  log('info', `=== VIDEO GENERATION START (${pipeline.sceneData.length} scenes) ===`);
   document.getElementById('approveImagesBtn').style.display = 'none';
 
-  // Build video stage cards
   const container = document.getElementById('videoStages');
   container.innerHTML = pipeline.sceneData.map((_, i) => createVideoStageHTML(i)).join('');
   container.style.display = 'block';
 
   pipeline.clipData = new Array(pipeline.sceneData.length).fill(null);
 
-  // Generate all videos in parallel
   const results = await Promise.allSettled(
     pipeline.sceneData.map((_, i) => generateOneVideo(i))
   );
@@ -1322,10 +1528,14 @@ async function approveImages() {
   let allOk = true;
   results.forEach((r, i) => {
     if (r.status === 'rejected') {
+      log('error', `Scene ${i + 1} video FAILED: ${r.reason?.message || 'Unknown'}${r.reason?.stack ? '\n' + r.reason.stack : ''}`);
       setVidStage(i, 'error', r.reason?.message || 'Failed', 0);
       allOk = false;
     }
   });
+
+  const ok = results.filter(r => r.status === 'fulfilled').length;
+  log(allOk ? 'success' : 'warn', `=== VIDEO GENERATION ${allOk ? 'COMPLETE' : 'PARTIAL'}: ${ok}/${results.length} OK, cost ~$${pipeline.totalCost.toFixed(2)} ===`);
 
   document.getElementById('costValue').textContent = `~$${pipeline.totalCost.toFixed(2)}`;
 
@@ -1351,11 +1561,13 @@ async function regenerateVideo(i) {
 // ── Phase 3: Stitch + Upload + Copy ──────────
 
 async function approveClips() {
+  log('info', `=== FINAL PHASE START: stitch + upload + copy ===`);
   document.getElementById('approveClipsBtn').style.display = 'none';
   document.getElementById('finalStages').style.display = 'block';
 
   const dims = pipeline.dims;
   const clips = pipeline.clipData.filter(Boolean);
+  log('info', `Clips ready: ${clips.length}, total duration: ${clips.reduce((a, c) => a + parseFloat(c.duration), 0)}s`);
   const workerUrl = document.getElementById('workerUrl').value.trim();
   const anthropicKey = document.getElementById('anthropicKey').value.trim();
   const businessName = document.getElementById('businessName').value.trim();
@@ -1394,39 +1606,45 @@ async function approveClips() {
             dlLink.style.display = 'block';
           }
         } catch (e) {
+          log('error', `R2 upload failed: ${e.message}`);
           setStage('Upload', 'error', e.message, 0);
         }
       } else {
+        log('info', 'No Worker URL — R2 upload skipped');
         setStage('Upload', 'done', 'No Worker URL — skipped', 100);
       }
     } catch (e) {
+      log('error', `Stitching failed: ${e.message}${e.stack ? '\n' + e.stack : ''}`);
       setStage('Stitch', 'error', e.message, 0);
     }
   })();
 
   const copyTask = (async () => {
     if (!anthropicKey) {
+      log('info', 'No Anthropic key — ad copy skipped');
       setStage('Copy', 'done', 'No Anthropic key — skipped', 100);
       return;
     }
     if (!businessName) {
+      log('warn', 'Business name missing — ad copy skipped');
       setStage('Copy', 'error', 'Business name required for copy generation', 0);
       return;
     }
     try {
       setStage('Copy', 'running', 'Writing ad copy...', 30);
-      const descriptions = clips.map(c => c.description);
-      const copy = await generateCopy(businessName, targetAudience, adObjective, offer, descriptions, anthropicKey);
+      const copy = await generateCopy(businessName, targetAudience, adObjective, offer, clips, anthropicKey);
       renderCopy(copy);
       setStage('Copy', 'done', 'Ad copy ready', 100);
       pipeline.totalCost += 0.003;
     } catch (e) {
+      log('error', `Ad copy generation failed: ${e.message}`);
       setStage('Copy', 'error', e.message, 0);
     }
   })();
 
   await Promise.all([stitchTask, copyTask]);
 
+  log('success', `=== PIPELINE COMPLETE — total cost ~$${pipeline.totalCost.toFixed(2)} ===`);
   document.getElementById('costValue').textContent = `~$${pipeline.totalCost.toFixed(2)}`;
   document.getElementById('startOverBtn').style.display = 'block';
 }
@@ -1442,6 +1660,7 @@ function startOver() {
   pipeline.clipData = [];
   pipeline.dims = null;
   pipeline.totalCost = 0;
+  pipeline.brandContext = '';
 
   document.getElementById('pipeline').style.display = 'none';
   document.getElementById('generateBtn').disabled = false;
