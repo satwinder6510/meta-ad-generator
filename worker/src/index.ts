@@ -8,7 +8,7 @@ function corsHeaders(origin: string, allowed: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': isAllowed ? origin : '',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Filename',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Filename, Authorization, x-fal-target-url',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -34,6 +34,34 @@ export default {
     // Health check
     if (url.pathname === '/health' && request.method === 'GET') {
       return jsonResponse({ ok: true }, 200, cors);
+    }
+
+    // fal.ai proxy — forwards requests to fal.ai to avoid browser CORS restrictions
+    if (url.pathname.startsWith('/fal-proxy')) {
+      const targetUrl = request.headers.get('x-fal-target-url');
+      if (!targetUrl || !targetUrl.startsWith('https://')) {
+        return jsonResponse({ error: 'Missing or invalid x-fal-target-url header' }, 400, cors);
+      }
+
+      const forwardHeaders = new Headers(request.headers);
+      forwardHeaders.delete('host');
+      forwardHeaders.delete('x-fal-target-url');
+
+      const falResponse = await fetch(targetUrl, {
+        method: request.method,
+        headers: forwardHeaders,
+        body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      });
+
+      const responseHeaders = new Headers(falResponse.headers);
+      for (const [key, value] of Object.entries(cors)) {
+        responseHeaders.set(key, value);
+      }
+
+      return new Response(falResponse.body, {
+        status: falResponse.status,
+        headers: responseHeaders,
+      });
     }
 
     // Proxy: fetch external URL, extract text content

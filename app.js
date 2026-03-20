@@ -827,6 +827,19 @@ function setStage(id, status, msg, progress) {
 
 // ── fal.ai REST client (no external dependency) ──
 
+// Route fal.ai requests through worker proxy to avoid CORS restrictions
+function falFetch(url, options) {
+  const workerUrl = (document.getElementById('workerUrl').value || '').trim().replace(/\/$/, '');
+  if (workerUrl) {
+    const proxyUrl = workerUrl + '/fal-proxy';
+    return fetch(proxyUrl, {
+      ...options,
+      headers: { ...options.headers, 'x-fal-target-url': url }
+    });
+  }
+  return fetch(url, options);
+}
+
 async function falRun(endpoint, input, apiKey, onProgress) {
   const inputSummary = { ...input };
   if (inputSummary.image_url) inputSummary.image_url = inputSummary.image_url.slice(0, 60) + '...';
@@ -841,7 +854,7 @@ async function falRun(endpoint, input, apiKey, onProgress) {
 
   try {
     // Submit to queue
-    const submitRes = await fetch(`https://queue.fal.run/${endpoint}`, {
+    const submitRes = await falFetch(`https://queue.fal.run/${endpoint}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(input)
@@ -857,7 +870,7 @@ async function falRun(endpoint, input, apiKey, onProgress) {
     while (true) {
       await new Promise(r => setTimeout(r, 3000));
       attempt++;
-      const statusRes = await fetch(
+      const statusRes = await falFetch(
         `https://queue.fal.run/${endpoint}/requests/${request_id}/status`,
         { headers }
       );
@@ -873,7 +886,7 @@ async function falRun(endpoint, input, apiKey, onProgress) {
     }
 
     // Fetch result
-    const resultRes = await fetch(
+    const resultRes = await falFetch(
       `https://queue.fal.run/${endpoint}/requests/${request_id}`,
       { headers }
     );
