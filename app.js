@@ -872,7 +872,7 @@ async function falRun(endpoint, input, apiKey, onProgress) {
       attempt++;
       const statusRes = await falFetch(
         `https://queue.fal.run/${endpoint}/requests/${request_id}/status`,
-        { headers }
+        { method: 'POST', headers }
       );
       if (!statusRes.ok) throw new Error(`Status poll failed: ${statusRes.status}`);
       const status = await statusRes.json();
@@ -888,7 +888,7 @@ async function falRun(endpoint, input, apiKey, onProgress) {
     // Fetch result
     const resultRes = await falFetch(
       `https://queue.fal.run/${endpoint}/requests/${request_id}`,
-      { headers }
+      { method: 'POST', headers }
     );
     if (!resultRes.ok) throw new Error(`Result fetch failed: ${resultRes.status}`);
     const result = await resultRes.json();

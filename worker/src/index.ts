@@ -43,9 +43,10 @@ export default {
         return jsonResponse({ error: 'Missing or invalid x-fal-target-url header' }, 400, cors);
       }
 
-      const forwardHeaders = new Headers(request.headers);
-      forwardHeaders.delete('host');
-      forwardHeaders.delete('x-fal-target-url');
+      const forwardHeaders = new Headers();
+      forwardHeaders.set('Authorization', request.headers.get('Authorization') || '');
+      forwardHeaders.set('Content-Type', request.headers.get('Content-Type') || 'application/json');
+      forwardHeaders.set('Accept', 'application/json');
 
       const falResponse = await fetch(targetUrl, {
         method: request.method,
